@@ -2,7 +2,7 @@ name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["pages"]
   workflow_dispatch:
 
 permissions:
@@ -46,5 +46,5 @@ jobs:
 
       - name: Deploy to GitHub Pages
         id: deployment
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/pages'
         uses: actions/deploy-pages@v4

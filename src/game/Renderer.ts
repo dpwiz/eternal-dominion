@@ -19,6 +19,8 @@ export class Renderer {
   resize(width: number, height: number) {
     this.width = width;
     this.height = height;
+    this.camera.x = this.width / 2;
+    this.camera.y = this.height / 2;
   }
 
   draw(state: GameState) {
