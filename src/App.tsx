@@ -6,6 +6,7 @@ import { pixelToHex, hexToString, Hex } from './game/HexMath';
 import { GameState } from './game/Types';
 import { CampaignEngine } from './game/Campaign';
 import { CampaignRenderer } from './game/CampaignRenderer';
+import { ALL_TECHS, FUSIONS } from './game/Content';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -125,8 +126,12 @@ export default function App() {
 
   const startSurvival = (hex: Hex) => {
     activeHexRef.current = hex;
-    const seed = hex.q * 1000 + hex.r + 500000;
-    const engine = new GameEngine(seed);
+    const tile = campaignEngineRef.current?.tiles.get(hexToString(hex));
+    const threatLevel = tile ? tile.threatLevel : 0;
+    
+    // Seed is ignored right now since generateMap doesn't use it, 
+    // but preserving constructor signature if needed or creating new
+    const engine = new GameEngine(threatLevel);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
     setGameState(engine.state);
@@ -160,7 +165,11 @@ export default function App() {
 
   const handleReturnToCampaign = (victory: boolean) => {
     if (activeHexRef.current && campaignEngineRef.current) {
-      campaignEngineRef.current.resolveRun(activeHexRef.current, victory);
+      const turnsPlayed = engineRef.current ? Math.max(1, engineRef.current.state.turn) : 1;
+      const earnedXp = engineRef.current ? Math.floor(engineRef.current.state.stats.cumulativeXp) : 0;
+      const techs = engineRef.current ? engineRef.current.state.techs : [];
+      const fusions = engineRef.current ? engineRef.current.state.fusions : [];
+      campaignEngineRef.current.resolveRun(activeHexRef.current, victory, turnsPlayed, earnedXp, techs, fusions);
     }
     setView('CAMPAIGN');
     engineRef.current = null;
@@ -169,6 +178,13 @@ export default function App() {
 
   const handleRestart = () => {
     if (activeHexRef.current) {
+      if (campaignEngineRef.current) {
+         const turnsPlayed = engineRef.current ? Math.max(1, engineRef.current.state.turn) : 1;
+         const earnedXp = engineRef.current ? Math.floor(engineRef.current.state.stats.cumulativeXp) : 0;
+         const techs = engineRef.current ? engineRef.current.state.techs : [];
+         const fusions = engineRef.current ? engineRef.current.state.fusions : [];
+         campaignEngineRef.current.resolveRun(activeHexRef.current, false, turnsPlayed, earnedXp, techs, fusions);
+      }
       startSurvival(activeHexRef.current);
     }
   };
@@ -179,6 +195,35 @@ export default function App() {
     return hasCleared 
       ? 'Claim territories to expand your village' 
       : 'Make landfall and establish a foothold to expand your village';
+  };
+
+  const renderProficiencies = () => {
+    const profs = campaignEngineRef.current?.proficiencies || {};
+    const keys = Object.keys(profs).sort((a,b) => profs[b] - profs[a]);
+    if (keys.length === 0) return null;
+
+    return (
+        <div className="absolute right-4 top-4 pointer-events-none">
+            <div className="bg-slate-900/90 text-white p-4 rounded-xl border border-slate-700 shadow-2xl w-64 max-h-[80vh] overflow-y-auto pointer-events-auto">
+              <div className="text-sm text-purple-400 font-bold tracking-wider mb-2">VILLAGE PROFICIENCY</div>
+              <div className="flex flex-col gap-1">
+                {keys.map(k => {
+                   const techDef = ALL_TECHS.find(t => t.id === k);
+                   const fDef = FUSIONS.find(f => f.id === k);
+                   const name = techDef ? techDef.name : (fDef ? fDef.name : k);
+                   const isFusion = !!fDef;
+
+                   return (
+                     <div key={k} className="flex justify-between items-center text-sm">
+                       <span className={isFusion ? 'text-amber-300' : 'text-slate-300'}>{name}</span>
+                       <span className="font-mono text-slate-500">x{profs[k]}</span>
+                     </div>
+                   );
+                })}
+              </div>
+            </div>
+        </div>
+    );
   };
 
   return (
@@ -200,12 +245,27 @@ export default function App() {
       
       {view === 'CAMPAIGN' && (
         <>
+          <div className="absolute top-4 left-4 pointer-events-none flex gap-4">
+            <div className="bg-slate-900/90 text-white px-4 py-2 rounded-xl border border-slate-700 shadow-2xl">
+              <div className="text-sm text-slate-400 font-bold tracking-wider">DAY</div>
+              <div className="text-2xl font-mono text-blue-400">
+                {campaignEngineRef.current?.days || 1}
+              </div>
+            </div>
+            <div className="bg-slate-900/90 text-white px-4 py-2 rounded-xl border border-slate-700 shadow-2xl">
+              <div className="text-sm text-amber-400 font-bold tracking-wider">LEVEL {campaignEngineRef.current?.globalLevel || 1}</div>
+              <div className="text-2xl font-mono text-amber-500">
+                {Math.floor(campaignEngineRef.current?.globalXp || 0)} <span className="text-sm text-slate-500">XP</span>
+              </div>
+            </div>
+          </div>
           <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none">
             <div className="bg-slate-900/90 text-white px-8 py-4 rounded-xl border border-slate-700 shadow-2xl flex flex-col items-center">
               <h1 className="text-3xl font-bold text-green-400 mb-1 tracking-wider">THE WILDS</h1>
               <p className="text-slate-400">{getCampaignMessage()}</p>
             </div>
           </div>
+          {renderProficiencies()}
           <div className="absolute bottom-4 right-4">
             <button
               onClick={() => {

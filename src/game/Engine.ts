@@ -11,8 +11,10 @@ export class GameEngine {
   spawnPoints: Hex[] = [];
   onStateChange?: (state: GameState) => void;
   spawnTimer = 0;
+  threatLevel: number;
 
-  constructor() {
+  constructor(threatLevel: number = 0) {
+    this.threatLevel = threatLevel;
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -35,7 +37,7 @@ export class GameEngine {
       phase: 'START',
       availableCities: 1,
       pendingTechPicks: [],
-      stats: { threatsKilled: 0, citiesLost: 0 }
+      stats: { threatsKilled: 0, citiesLost: 0, cumulativeXp: 0 }
     };
   }
 
@@ -158,17 +160,32 @@ export class GameEngine {
     if (this.spawnTimer > 0) return;
 
     const turn = this.state.turn;
-    let interval = 1.5;
-    let types: ('Scout'|'Warrior'|'Brute')[] = ['Scout'];
-
-    if (turn > 10) { interval = 1.0; types = ['Scout', 'Warrior']; }
-    if (turn > 20) { interval = 0.75; types = ['Scout', 'Warrior', 'Brute']; }
-    if (turn > 30) { interval = 0.5; types = ['Warrior', 'Brute']; }
-    if (turn > 35) { interval = 0.25; types = ['Brute']; }
-
+    
+    // Scale interval dynamically: lower when turn gets higher, and slightly lower with higher threats
+    let interval = Math.max(0.2, 1.5 - (turn * 0.02) - (this.threatLevel * 0.15));
     this.spawnTimer = interval;
 
-    const type = types[Math.floor(Math.random() * types.length)];
+    if (this.spawnPoints.length === 0) return;
+
+    // Phases out of 40 turns max -> Early (<= 13), Mid (> 13 && <= 26), Final (> 26)
+    const isMid = turn > 13;
+    const isFinal = turn > 26;
+
+    let possibleTypes: ('Scout'|'Warrior'|'Brute')[] = ['Scout'];
+
+    if (this.threatLevel === 0) {
+      if (isFinal) possibleTypes.push('Warrior');
+    } else if (this.threatLevel === 1) {
+      if (isMid || isFinal) possibleTypes.push('Warrior');
+      if (isFinal) possibleTypes.push('Brute');
+    } else if (this.threatLevel === 2) {
+      possibleTypes.push('Warrior'); // Warriors from the start
+      if (isMid || isFinal) possibleTypes.push('Brute');
+    } else { // 3+
+      possibleTypes.push('Warrior', 'Brute');
+    }
+
+    const type = possibleTypes[Math.floor(Math.random() * possibleTypes.length)];
     const spawnHex = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
     const pos = hexToPixel(spawnHex, HEX_SIZE);
 
@@ -603,7 +620,9 @@ export class GameEngine {
     const xpMult = this.hasTech('Writing') ? 1.25 : 1.0;
     this.state.enemies = this.state.enemies.filter(e => {
       if (e.hp <= 0) {
-        this.state.xp += (e.maxHp * 0.1) * xpMult;
+        const xpGain = (e.maxHp * 0.1) * xpMult;
+        this.state.xp += xpGain;
+        this.state.stats.cumulativeXp += xpGain;
         this.state.stats.threatsKilled++;
         return false;
       }

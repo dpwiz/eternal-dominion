@@ -13,6 +13,10 @@ export interface CampaignTile {
 
 export class CampaignEngine {
   tiles: Map<string, CampaignTile> = new Map();
+  days: number = 1;
+  globalXp: number = 0;
+  globalLevel: number = 1;
+  proficiencies: Record<string, number> = {};
 
   constructor(seed: number = 42) {
     if (this.load()) {
@@ -44,19 +48,40 @@ export class CampaignEngine {
         });
       }
     }
+    this.days = 1;
+    this.globalXp = 0;
+    this.globalLevel = 1;
+    this.proficiencies = {};
     this.updateStatuses();
   }
 
-  resolveRun(hex: Hex, victory: boolean) {
+  resolveRun(hex: Hex, victory: boolean, turnsPlayed: number, earnedXp: number, techs: string[], fusions: string[]) {
+    this.days += turnsPlayed;
+    this.globalXp += earnedXp;
+    this.globalLevel = Math.floor(Math.sqrt(this.globalXp / 100)) + 1; // Basic global scaling
+
     if (victory) {
       const key = hexToString(hex);
       const tile = this.tiles.get(key);
       if (tile && tile.status === 'CLAIMABLE') {
         tile.status = 'CLEARED';
         this.updateStatuses();
-        this.save();
+      }
+
+      for (const t of techs) {
+        this.proficiencies[t] = (this.proficiencies[t] || 0) + 1;
+      }
+      for (const f of fusions) {
+        this.proficiencies[f] = (this.proficiencies[f] || 0) + 1;
+      }
+    } else {
+      for (const t of techs) {
+        if (Math.random() < 0.5) {
+          this.proficiencies[t] = (this.proficiencies[t] || 0) + 1;
+        }
       }
     }
+    this.save();
   }
 
   updateStatuses() {
@@ -92,7 +117,13 @@ export class CampaignEngine {
   }
 
   save() {
-    const data = Array.from(this.tiles.entries());
+    const data = {
+      tiles: Array.from(this.tiles.entries()),
+      days: this.days,
+      globalXp: this.globalXp,
+      globalLevel: this.globalLevel,
+      proficiencies: this.proficiencies
+    };
     localStorage.setItem('campaign_save', JSON.stringify(data));
   }
 
@@ -101,7 +132,20 @@ export class CampaignEngine {
     if (saved) {
       try {
         const data = JSON.parse(saved);
-        this.tiles = new Map(data);
+        if (Array.isArray(data)) {
+            // legacy save migration
+            this.tiles = new Map(data);
+            this.days = 1;
+            this.globalXp = 0;
+            this.globalLevel = 1;
+            this.proficiencies = {};
+        } else {
+            this.tiles = new Map(data.tiles);
+            this.days = data.days || 1;
+            this.globalXp = data.globalXp || 0;
+            this.globalLevel = data.globalLevel || 1;
+            this.proficiencies = data.proficiencies || {};
+        }
         return true;
       } catch (e) {
         console.error('Failed to load campaign save', e);

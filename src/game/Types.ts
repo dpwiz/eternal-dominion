@@ -88,5 +88,6 @@ export interface GameState {
   stats: {
     threatsKilled: number;
     citiesLost: number;
+    cumulativeXp: number;
   };
 }
