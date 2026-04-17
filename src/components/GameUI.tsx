@@ -6,9 +6,10 @@ interface GameUIProps {
   state: GameState;
   onPickTech: (id: string) => void;
   onRestart: () => void;
+  onReturnToCampaign?: (victory: boolean) => void;
 }
 
-export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) => {
+export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart, onReturnToCampaign }) => {
   const acquiredTechs = state.techs.map(id => ALL_TECHS.find(t => t.id === id)).filter(Boolean);
   const acquiredFusions = state.fusions.map(id => FUSIONS.find(f => f.id === id)).filter(Boolean);
 
@@ -43,7 +44,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) 
 
         <div className="flex gap-4">
           <div className="flex flex-col items-end">
-            <span className="text-sm text-slate-300">Cities</span>
+            <span className="text-sm text-slate-300">Outposts</span>
             <span className="text-xl font-bold">{state.cities.length}</span>
           </div>
           <div className="flex flex-col items-end">
@@ -72,7 +73,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) 
           
           {acquiredTechs.length > 0 && (
             <div>
-              <h3 className="text-lg font-bold text-blue-400 mb-2 border-b border-slate-700 pb-1">Technologies</h3>
+              <h3 className="text-lg font-bold text-blue-400 mb-2 border-b border-slate-700 pb-1">Developments</h3>
               <ul className="flex flex-col gap-3">
                 {acquiredTechs.map(t => (
                   <li key={t!.id} className="text-sm">
@@ -117,15 +118,15 @@ export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) 
         {/* City Readouts */}
         {state.cities.length > 0 && (
           <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0">
-            <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Cities</h3>
+            <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Outposts</h3>
             <div className="flex flex-col gap-4">
               {state.cities.map((city, index) => {
-                const defenders = state.friendlyUnits.filter(u => u.cityId === city.id).length;
+                const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && u.type === 'guard').length;
                 const maxDefenders = Math.min(6, city.size);
                 return (
                   <div key={city.id} className="flex flex-col text-sm">
                     <div className="flex justify-between font-semibold text-slate-200">
-                      <span>City {index + 1}</span>
+                      <span>Outpost {index + 1}</span>
                       <span className="text-blue-300">Size {city.size}</span>
                     </div>
                     <div className="flex justify-between text-slate-400 text-xs mt-1">
@@ -149,13 +150,13 @@ export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) 
       {/* Prompts */}
       {state.phase === 'START' && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
-          Click anywhere on the map to place your Capital City
+          Click anywhere on the map to place your Capital Outpost
         </div>
       )}
 
       {state.phase === 'PLAYING' && state.availableCities > 0 && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
-          Click to place a new City (must be 3 tiles away from others)
+          Click to place a new Outpost (must be 3 tiles away from others)
         </div>
       )}
 
@@ -185,21 +186,31 @@ export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart }) 
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-auto">
           <div className="bg-slate-800 p-8 rounded-xl max-w-md w-full text-center">
             <h2 className={`text-4xl font-bold mb-4 ${state.phase === 'VICTORY' ? 'text-yellow-400' : 'text-red-500'}`}>
-              {state.phase === 'VICTORY' ? 'VICTORY' : 'DEFEAT'}
+              {state.phase === 'VICTORY' ? 'VICTORY' : 'OUTPOSTS FALLEN'}
             </h2>
             <div className="text-slate-300 mb-8 flex flex-col gap-2">
               <p>Survived until Wave: {state.turn}</p>
-              <p>Threats Killed: {state.stats.threatsKilled}</p>
-              <p>Cities Lost: {state.stats.citiesLost}</p>
-              <p>Techs Acquired: {state.techs.length}</p>
+              <p>Beasts Killed: {state.stats.threatsKilled}</p>
+              <p>Outposts Lost: {state.stats.citiesLost}</p>
+              <p>Developments Acquired: {state.techs.length}</p>
               <p>Fusions Discovered: {state.fusions.length}</p>
             </div>
-            <button
-              onClick={onRestart}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-lg font-bold text-lg transition-colors"
-            >
-              Play Again
-            </button>
+            
+            {state.phase === 'VICTORY' ? (
+              <button
+                onClick={() => onReturnToCampaign?.(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-lg font-bold text-lg transition-colors"
+              >
+                Claim the Land
+              </button>
+            ) : (
+              <button
+                onClick={() => onReturnToCampaign?.(false)}
+                className="bg-red-600 hover:bg-red-500 text-white px-8 py-3 rounded-lg font-bold text-lg transition-colors"
+              >
+                We'll be back!
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -37,7 +37,7 @@ export const hexRound = (hex: Hex): Hex => {
   return { q, r, s };
 };
 
-export const hexToString = (hex: Hex): string => `${hex.q},${hex.r}`;
+export const hexToString = (hex: Hex): string => `${hex.q === -0 ? 0 : hex.q},${hex.r === -0 ? 0 : hex.r}`;
 
 export const stringToHex = (str: string): Hex => {
   const [q, r] = str.split(',').map(Number);

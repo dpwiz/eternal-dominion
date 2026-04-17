@@ -73,7 +73,10 @@ export class GameEngine {
       if (hexDistance(city.hex, hex) < 3) return false;
     }
 
-    const maxHp = this.hasTech('Pottery') ? 150 : 100;
+    let maxHp = 100;
+    if (this.hasTech('Pottery')) maxHp += 50;
+    if (this.hasTech('Masonry')) maxHp += 50;
+
     const cityId = Math.random().toString();
     this.state.cities.push({
       id: cityId,
@@ -109,7 +112,8 @@ export class GameEngine {
       this.onTurnChange(currentTurn);
     }
 
-    if (this.state.time >= 400 && this.state.enemies.length === 0) {
+    const hostileEnemies = this.state.enemies.filter(e => !e.isConverted).length;
+    if (this.state.time >= 400 && hostileEnemies === 0) {
       this.state.phase = 'VICTORY';
       this.notify();
       return;
@@ -640,6 +644,13 @@ export class GameEngine {
     this.state.techs.push(techId);
     this.state.pendingTechPicks.shift();
 
+    if (techId === 'Masonry') {
+      for (const city of this.state.cities) {
+        city.maxHp += 50;
+        city.hp += 50;
+      }
+    }
+
     for (const fusion of FUSIONS) {
       if (!this.state.fusions.includes(fusion.id)) {
         if (fusion.req.every(req => this.state.techs.includes(req))) {
@@ -667,5 +678,16 @@ export class GameEngine {
     if (this.onStateChange) {
       this.onStateChange({ ...this.state });
     }
+  }
+
+  instaWin() {
+    this.state.phase = 'VICTORY';
+    this.state.enemies = [];
+    this.notify();
+  }
+
+  instaLose() {
+    this.state.phase = 'GAME_OVER';
+    this.notify();
   }
 }
