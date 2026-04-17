@@ -12,9 +12,11 @@ export class GameEngine {
   onStateChange?: (state: GameState) => void;
   spawnTimer = 0;
   threatLevel: number;
+  safeEdges: boolean[];
 
-  constructor(threatLevel: number = 0) {
+  constructor(threatLevel: number = 0, safeEdges: boolean[] = [false, false, false, false, false, false]) {
     this.threatLevel = threatLevel;
+    this.safeEdges = safeEdges;
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -43,6 +45,11 @@ export class GameEngine {
 
   generateMap() {
     this.spawnPoints = [];
+    const _hexDirections = [
+      { q: 1, r: 0, s: -1 }, { q: 1, r: -1, s: 0 }, { q: 0, r: -1, s: 1 },
+      { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
+    ];
+
     for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
       for (let r = Math.max(-MAP_RADIUS, -q - MAP_RADIUS); r <= Math.min(MAP_RADIUS, -q + MAP_RADIUS); r++) {
         const s = -q - r;
@@ -56,11 +63,28 @@ export class GameEngine {
         else if (rand < 0.20) terrain = Terrain.Hills;
         else if (rand < 0.40) terrain = Terrain.Forest;
 
+        let borderType: 'safe' | 'threat' | undefined = undefined;
+
         if (isEdge) {
-          this.spawnPoints.push(hex);
+          const dots = _hexDirections.map(d => d.q * q + d.r * r + d.s * s);
+          const maxDot = Math.max(...dots);
+          
+          let isSafe = false;
+          for (let i = 0; i < 6; i++) {
+             if (dots[i] === maxDot && this.safeEdges[i]) {
+                isSafe = true;
+             }
+          }
+
+          if (isSafe) {
+             borderType = 'safe';
+          } else {
+             borderType = 'threat';
+             this.spawnPoints.push(hex);
+          }
         }
 
-        this.state.tiles.set(hexToString(hex), { hex, terrain });
+        this.state.tiles.set(hexToString(hex), { hex, terrain, borderType });
       }
     }
   }

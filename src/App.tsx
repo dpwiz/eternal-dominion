@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine, HEX_SIZE } from './game/Engine';
 import { Renderer } from './game/Renderer';
 import { GameUI } from './components/GameUI';
-import { pixelToHex, hexToString, Hex } from './game/HexMath';
+import { pixelToHex, hexToString, Hex, hexNeighbor } from './game/HexMath';
 import { GameState } from './game/Types';
 import { CampaignEngine } from './game/Campaign';
 import { CampaignRenderer } from './game/CampaignRenderer';
@@ -129,9 +129,21 @@ export default function App() {
     const tile = campaignEngineRef.current?.tiles.get(hexToString(hex));
     const threatLevel = tile ? tile.threatLevel : 0;
     
+    // Check neighbors to build safe edges
+    const safeEdges = [false, false, false, false, false, false];
+    if (campaignEngineRef.current) {
+       for (let i = 0; i < 6; i++) {
+          const nHex = hexNeighbor(hex, i);
+          const nTile = campaignEngineRef.current.tiles.get(hexToString(nHex));
+          if (nTile && nTile.status === 'CLEARED') {
+             safeEdges[i] = true;
+          }
+       }
+    }
+    
     // Seed is ignored right now since generateMap doesn't use it, 
     // but preserving constructor signature if needed or creating new
-    const engine = new GameEngine(threatLevel);
+    const engine = new GameEngine(threatLevel, safeEdges);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
     setGameState(engine.state);

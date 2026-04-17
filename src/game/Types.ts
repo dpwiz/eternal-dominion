@@ -5,6 +5,7 @@ export enum Terrain { Plains, Hills, Forest, Mountains }
 export interface Tile {
   hex: Hex;
   terrain: Terrain;
+  borderType?: 'safe' | 'threat';
 }
 
 export interface City {

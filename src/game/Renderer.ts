@@ -37,6 +37,20 @@ export class Renderer {
       if (tile.terrain === Terrain.Mountains) color = '#7a7a7a';
 
       this.drawHex(pos.x, pos.y, HEX_SIZE - 1, color);
+
+      if (tile.borderType === 'safe') {
+        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'rgba(2, 132, 199, 0.5)'; // sky-600
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+      } else if (tile.borderType === 'threat') {
+        this.ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; // red-500
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'rgba(185, 28, 28, 0.5)'; // red-700
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+      }
     }
 
     for (const city of state.cities) {
