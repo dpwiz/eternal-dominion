@@ -30,6 +30,7 @@ export interface Enemy {
   speed: number;
   damage: number;
   isConverted: boolean;
+  targetId?: string;
 }
 
 export interface Tech {
@@ -60,6 +61,7 @@ export interface FriendlyUnit {
   id: string;
   cityId: string;
   type: 'guard' | 'cavalry';
+  cavalryIndex?: number;
   x: number;
   y: number;
   targetId: string | null;
@@ -80,6 +82,7 @@ export interface GameState {
   fusions: string[];
   turn: number;
   time: number;
+  spawnRate: number;
   xp: number;
   level: number;
   xpToNext: number;

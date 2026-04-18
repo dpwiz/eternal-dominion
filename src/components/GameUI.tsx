@@ -1,26 +1,24 @@
 import React from 'react';
 import { GameState } from '../game/Types';
 import { ALL_TECHS, FUSIONS } from '../game/Content';
+import { getWaveEnemiesText } from '../game/Engine';
 
 interface GameUIProps {
   state: GameState;
+  threatLevel: number;
   onPickTech: (id: string) => void;
   onRestart: () => void;
   onReturnToCampaign?: (victory: boolean) => void;
 }
 
-export const GameUI: React.FC<GameUIProps> = ({ state, onPickTech, onRestart, onReturnToCampaign }) => {
+export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, onRestart, onReturnToCampaign }) => {
   const acquiredTechs = state.techs.map(id => ALL_TECHS.find(t => t.id === id)).filter(Boolean);
   const acquiredFusions = state.fusions.map(id => FUSIONS.find(f => f.id === id)).filter(Boolean);
 
   const hasCalendar = state.techs.includes('Calendar');
   const timeToNextWave = Math.max(0, 10 - (state.time % 10));
   const nextTurn = state.turn + 1;
-  let nextWaveEnemies = 'Scouts';
-  if (nextTurn > 35) nextWaveEnemies = 'Massive Brute Swarm';
-  else if (nextTurn > 30) nextWaveEnemies = 'Warriors, Brutes';
-  else if (nextTurn > 20) nextWaveEnemies = 'Scouts, Warriors, Brutes';
-  else if (nextTurn > 10) nextWaveEnemies = 'Scouts, Warriors';
+  const nextWaveEnemies = getWaveEnemiesText(nextTurn, threatLevel);
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col">

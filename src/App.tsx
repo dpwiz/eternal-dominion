@@ -12,6 +12,7 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [view, setView] = useState<'CAMPAIGN' | 'SURVIVAL'>('CAMPAIGN');
+  const [showDebug, setShowDebug] = useState(false);
   
   const campaignEngineRef = useRef<CampaignEngine | null>(null);
   const campaignRendererRef = useRef<CampaignRenderer | null>(null);
@@ -108,6 +109,8 @@ export default function App() {
           doInstaWin();
         } else if (e.key.toLowerCase() === 'l') {
           doInstaLose();
+        } else if (e.key.toLowerCase() === 'd') {
+          setShowDebug(prev => !prev);
         }
       }
     };
@@ -249,10 +252,20 @@ export default function App() {
       {view === 'SURVIVAL' && gameState && (
         <GameUI 
           state={gameState} 
+          threatLevel={engineRef.current?.threatLevel ?? 0}
           onPickTech={(id) => engineRef.current?.pickTech(id)}
           onRestart={handleRestart}
           onReturnToCampaign={handleReturnToCampaign}
         />
+      )}
+      
+      {showDebug && view === 'SURVIVAL' && (
+        <div className="absolute top-4 right-4 pointer-events-none bg-black/80 text-white p-3 rounded font-mono text-sm border border-slate-700 z-50">
+          <div className="text-red-400 font-bold mb-1">DEBUG OVERLAY</div>
+          <div>Threat Level: {engineRef.current?.threatLevel ?? 0}</div>
+          <div>Spawn Rate: {(gameState?.spawnRate ?? 0).toFixed(2)}/s</div>
+          <div>Turn: {gameState?.turn ?? 1}</div>
+        </div>
       )}
       
       {view === 'CAMPAIGN' && (

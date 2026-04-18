@@ -5,12 +5,33 @@ import { ALL_TECHS, FUSIONS } from './Content';
 export const HEX_SIZE = 20;
 export const MAP_RADIUS = 12;
 
+export function getWaveEnemies(turn: number, threatLevel: number): ('Scout' | 'Warrior' | 'Brute')[] {
+  const effectiveTurn = turn + (threatLevel * 5);
+  if (effectiveTurn > 35) return ['Brute'];
+  if (effectiveTurn > 30) return ['Warrior', 'Brute'];
+  if (effectiveTurn > 20) return ['Scout', 'Warrior', 'Brute'];
+  if (effectiveTurn > 10) return ['Scout', 'Warrior'];
+  return ['Scout'];
+}
+
+export function getWaveEnemiesText(turn: number, threatLevel: number): string {
+  const effectiveTurn = turn + (threatLevel * 5);
+  if (effectiveTurn > 35) return 'Massive Brute Swarm';
+  if (effectiveTurn > 30) return 'Warriors, Brutes';
+  if (effectiveTurn > 20) return 'Scouts, Warriors, Brutes';
+  if (effectiveTurn > 10) return 'Scouts, Warriors';
+  return 'Scouts';
+}
+
 export class GameEngine {
   state: GameState;
   costs: Map<string, number> = new Map();
   spawnPoints: Hex[] = [];
+  safePoints: Hex[] = [];
   onStateChange?: (state: GameState) => void;
   spawnTimer = 0;
+  reinforcementTimer = 0;
+  currentSpawnRate = 0;
   threatLevel: number;
   safeEdges: boolean[];
 
@@ -33,6 +54,7 @@ export class GameEngine {
       fusions: [],
       turn: 1,
       time: 0,
+      spawnRate: 0,
       xp: 0,
       level: 1,
       xpToNext: 100,
@@ -45,6 +67,7 @@ export class GameEngine {
 
   generateMap() {
     this.spawnPoints = [];
+    this.safePoints = [];
     const _hexDirections = [
       { q: 1, r: 0, s: -1 }, { q: 1, r: -1, s: 0 }, { q: 0, r: -1, s: 1 },
       { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
@@ -78,6 +101,7 @@ export class GameEngine {
 
           if (isSafe) {
              borderType = 'safe';
+             this.safePoints.push(hex);
           } else {
              borderType = 'threat';
              this.spawnPoints.push(hex);
@@ -127,8 +151,89 @@ export class GameEngine {
   hasTech(id: string) { return this.state.techs.includes(id); }
   hasFusion(id: string) { return this.state.fusions.includes(id); }
 
+  getEnemySize(type: 'Scout' | 'Warrior' | 'Brute'): number {
+    return type === 'Scout' ? 1 : (type === 'Warrior' ? 2 : 3);
+  }
+
+  getFriendlySize(unit: import('./Types').FriendlyUnit): number {
+    if (unit.type === 'guard') return 2;
+    if (unit.type === 'cavalry') {
+      const idx = unit.cavalryIndex ?? 0;
+      return idx + 1 + (this.hasFusion('WarChariots') ? 1 : 0);
+    }
+    return 1;
+  }
+
+  assignTargets() {
+    const hostiles = this.state.enemies.filter(e => !e.isConverted);
+    const hostileSlots = new Map<string, number>();
+    const onOutpost = new Map<string, boolean>();
+
+    for (const e of hostiles) {
+        hostileSlots.set(e.id, 0);
+        onOutpost.set(e.id, this.costs.get(hexToString(e.hex)) === 0);
+    }
+
+    interface Attacker {
+        id: string; type: 'friendly'|'converted'; size: number;
+        x: number; y: number; cityId?: string; entity: any;
+    }
+    const attackers: Attacker[] = [];
+    for (const e of this.state.enemies) if (e.isConverted) attackers.push({ id: e.id, type: 'converted', size: this.getEnemySize(e.type), x: e.x, y: e.y, entity: e });
+    for (const u of this.state.friendlyUnits) attackers.push({ id: u.id, type: 'friendly', size: this.getFriendlySize(u), x: u.x, y: u.y, cityId: u.cityId, entity: u });
+
+    attackers.sort((a,b) => b.size - a.size);
+
+    const baseRadius = this.hasTech('Exploration') ? 4 : 2;
+
+    for (const att of attackers) {
+        let bestTarget: import('./Types').Enemy | null = null;
+        let bestDist = Infinity;
+
+        // 1. Same size (duel)
+        for (const h of hostiles) {
+            const hSize = this.getEnemySize(h.type);
+            const filled = hostileSlots.get(h.id)!;
+            if (hSize === att.size && hSize - filled >= att.size) {
+                if (att.type === 'friendly') {
+                    const city = this.state.cities.find(c => c.id === att.cityId);
+                    if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > baseRadius) continue;
+                }
+                const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                if (dist < bestDist) { bestDist = dist; bestTarget = h; }
+            }
+        }
+
+        // 2. Larger size (harass)
+        if (!bestTarget) {
+            bestDist = Infinity;
+            for (const h of hostiles) {
+                const hSize = this.getEnemySize(h.type);
+                const filled = hostileSlots.get(h.id)!;
+                if (hSize > att.size && hSize - filled >= att.size) {
+                    if (att.type === 'friendly') {
+                        const city = this.state.cities.find(c => c.id === att.cityId);
+                        if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > baseRadius) continue;
+                    }
+                    const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                    if (dist < bestDist) { bestDist = dist; bestTarget = h; }
+                }
+            }
+        }
+
+        if (bestTarget) {
+            att.entity.targetId = bestTarget.id;
+            hostileSlots.set(bestTarget.id, hostileSlots.get(bestTarget.id)! + att.size);
+        } else {
+            att.entity.targetId = null;
+        }
+    }
+  }
+
   update(dt: number) {
     if (this.state.phase !== 'PLAYING') return;
+
+    this.assignTargets();
 
     this.state.time += dt;
     const currentTurn = Math.floor(this.state.time / 10) + 1;
@@ -146,7 +251,23 @@ export class GameEngine {
     }
 
     if (this.state.time < 400) {
-      this.spawnEnemies(dt);
+      const turn = this.state.turn;
+      const wavePhase = this.state.time % 10;
+      
+      const baseInterval = Math.max(0.2, 1.5 - (turn * 0.02) - (this.threatLevel * 0.15));
+      const baseRate = 1 / baseInterval;
+      
+      const rateMultiplier = 7.5 * Math.pow(wavePhase, 1.5) * Math.exp(-wavePhase);
+      const currentRate = baseRate * rateMultiplier;
+      this.currentSpawnRate = currentRate;
+      this.state.spawnRate = currentRate;
+
+      this.spawnTimer -= currentRate * dt;
+      while (this.spawnTimer <= 0) {
+        this.spawnTimer += 1.0;
+        this.spawnEnemies();
+        this.spawnReinforcements();
+      }
     }
     this.updateEnemies(dt);
     this.updateCombat(dt);
@@ -179,35 +300,32 @@ export class GameEngine {
     });
   }
 
-  spawnEnemies(dt: number) {
-    this.spawnTimer -= dt;
-    if (this.spawnTimer > 0) return;
+  spawnReinforcements() {
+    if (this.safePoints.length === 0) return;
 
     const turn = this.state.turn;
-    
-    // Scale interval dynamically: lower when turn gets higher, and slightly lower with higher threats
-    let interval = Math.max(0.2, 1.5 - (turn * 0.02) - (this.threatLevel * 0.15));
-    this.spawnTimer = interval;
+    const type = 'Scout';
+    const spawnHex = this.safePoints[Math.floor(Math.random() * this.safePoints.length)];
+    const pos = hexToPixel(spawnHex, HEX_SIZE);
 
+    let hp = 20, speed = 1.6, damage = 2;
+    hp *= (1 + turn * 0.1);
+    damage *= (1 + turn * 0.05);
+
+    this.state.enemies.push({
+      id: Math.random().toString(),
+      hex: spawnHex,
+      x: pos.x,
+      y: pos.y,
+      hp, maxHp: hp, type, speed, damage, isConverted: true
+    });
+  }
+
+  spawnEnemies() {
     if (this.spawnPoints.length === 0) return;
 
-    // Phases out of 40 turns max -> Early (<= 13), Mid (> 13 && <= 26), Final (> 26)
-    const isMid = turn > 13;
-    const isFinal = turn > 26;
-
-    let possibleTypes: ('Scout'|'Warrior'|'Brute')[] = ['Scout'];
-
-    if (this.threatLevel === 0) {
-      if (isFinal) possibleTypes.push('Warrior');
-    } else if (this.threatLevel === 1) {
-      if (isMid || isFinal) possibleTypes.push('Warrior');
-      if (isFinal) possibleTypes.push('Brute');
-    } else if (this.threatLevel === 2) {
-      possibleTypes.push('Warrior'); // Warriors from the start
-      if (isMid || isFinal) possibleTypes.push('Brute');
-    } else { // 3+
-      possibleTypes.push('Warrior', 'Brute');
-    }
+    const turn = this.state.turn;
+    const possibleTypes = getWaveEnemies(turn, this.threatLevel);
 
     const type = possibleTypes[Math.floor(Math.random() * possibleTypes.length)];
     const spawnHex = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
@@ -274,37 +392,66 @@ export class GameEngine {
         if (currentTile.terrain === Terrain.Forest || currentTile.terrain === Terrain.Hills) terrainCost = 2;
         else if (currentTile.terrain === Terrain.Mountains) terrainCost = 5;
       }
-      const actualSpeed = enemy.speed / terrainCost;
+      let actualSpeed = enemy.speed / terrainCost;
 
       if (enemy.isConverted) {
-        let target: Enemy | null = null;
-        let minDist = Infinity;
-        for (const e of this.state.enemies) {
-          if (!e.isConverted) {
-            const dist = Math.hypot(e.x - enemy.x, e.y - enemy.y);
-            if (dist < minDist) { minDist = dist; target = e; }
-          }
-        }
+        const target = enemy.targetId ? this.state.enemies.find(e => e.id === enemy.targetId) : null;
+
         if (target) {
           const dx = target.x - enemy.x;
           const dy = target.y - enemy.y;
-          if (minDist > 5) {
-            enemy.x += (dx / minDist) * actualSpeed * HEX_SIZE * dt;
-            enemy.y += (dy / minDist) * actualSpeed * HEX_SIZE * dt;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) {
+            enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
+            enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
             enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
           } else {
-            target.hp -= enemy.damage * dt;
+            target.hp -= enemy.damage * dt; // Converted strikes Hostile
+            enemy.hp -= target.damage * 0.5 * dt; // Hostile passive feedback
             if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
+            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+          }
+        } else {
+          // Fallback: move to most damaged outpost
+          let bestCity = null;
+          let minRatio = Infinity;
+          for (const c of this.state.cities) {
+            const ratio = c.hp / c.maxHp;
+            if (ratio < minRatio) { minRatio = ratio; bestCity = c; }
+          }
+          if (bestCity) {
+            const cp = hexToPixel(bestCity.hex, HEX_SIZE);
+            const dx = cp.x - enemy.x;
+            const dy = cp.y - enemy.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 15) {
+              enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
+              enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
+              enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+            }
           }
         }
         continue;
       }
 
+      const enemySize = this.getEnemySize(enemy.type);
+      let filledSlots = 0;
+      for (const u of this.state.friendlyUnits) {
+        if (u.targetId === enemy.id && Math.hypot(u.x - enemy.x, u.y - enemy.y) < 15) {
+          filledSlots += this.getFriendlySize(u);
+        }
+      }
+      for (const e of this.state.enemies) {
+        if (e.isConverted && e.targetId === enemy.id && Math.hypot(e.x - enemy.x, e.y - enemy.y) < 15) {
+          filledSlots += this.getEnemySize(e.type);
+        }
+      }
+
+      const speedMult = Math.max(0, 1 - (filledSlots / enemySize));
+      actualSpeed *= speedMult;
+
       const currentCost = this.costs.get(hexToString(enemy.hex)) ?? 9999;
       if (currentCost === 0) continue;
-
-      const isEngaged = this.state.friendlyUnits.some(u => u.targetId === enemy.id && u.state === 'melee');
-      if (isEngaged) continue;
 
       let bestNeighbor = enemy.hex;
       let lowestCost = currentCost;
@@ -451,14 +598,6 @@ export class GameEngine {
       }
     }
 
-    // Pre-calculate current claims
-    const currentClaims = new Map<string, number>();
-    for (const unit of this.state.friendlyUnits) {
-      if (unit.targetId) {
-        currentClaims.set(unit.targetId, (currentClaims.get(unit.targetId) || 0) + 1);
-      }
-    }
-
     // Update friendly units
     this.state.friendlyUnits = this.state.friendlyUnits.filter(unit => {
       const city = this.state.cities.find(c => c.id === unit.cityId);
@@ -479,129 +618,65 @@ export class GameEngine {
       }
       const actualSpeed = speed / unitTerrainCost;
 
-      if (unit.state === 'idle') {
-        unit.hp = Math.min(unit.maxHp, unit.hp + 5 * dt); // Regenerate while idle
-        
-        if (isCavalry) {
-          unit.angle += dt * (this.hasFusion('WarChariots') ? 1.5 : 1.0);
-          const orbitRadius = 4.0 * HEX_SIZE; 
-          const targetX = cityPos.x + Math.cos(unit.angle) * orbitRadius;
-          const targetY = cityPos.y + Math.sin(unit.angle) * orbitRadius;
-          
-          const dx = targetX - unit.x;
-          const dy = targetY - unit.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > 0) {
-            const moveDist = Math.min(dist, actualSpeed * dt);
-            unit.x += (dx / dist) * moveDist;
-            unit.y += (dy / dist) * moveDist;
-          }
-
-          const currentHex = pixelToHex(unit.x, unit.y, HEX_SIZE);
-          let target: Enemy | null = null;
-          for (const enemy of this.state.enemies) {
-            if (enemy.isConverted) continue;
-            if (hexDistance(enemy.hex, currentHex) <= 1) {
-              target = enemy;
-              break;
-            }
-          }
-          if (target) {
-            unit.targetId = target.id;
-            unit.state = 'engaging';
-          }
-        } else {
-          unit.angle += dt * 2;
-          const targetX = cityPos.x + Math.cos(unit.angle) * 12;
-          const targetY = cityPos.y + Math.sin(unit.angle) * 12;
-          unit.x += (targetX - unit.x) * 5 * dt;
-          unit.y += (targetY - unit.y) * 5 * dt;
-
-          let closest: Enemy | null = null;
-          let minDist = Infinity;
-          for (const enemy of this.state.enemies) {
-            if (enemy.isConverted) continue;
-            
-            const claimCapacity = enemy.type === 'Brute' ? 3 : (enemy.type === 'Warrior' ? 2 : 1);
-            const claims = currentClaims.get(enemy.id) || 0;
-            if (claims >= claimCapacity) continue;
-
-            if (hexDistance(city.hex, enemy.hex) <= baseRadius) {
-              const dist = Math.hypot(enemy.x - cityPos.x, enemy.y - cityPos.y);
-              if (dist < minDist) {
-                minDist = dist;
-                closest = enemy;
-              }
-            }
-          }
-          if (closest) {
-            unit.targetId = closest.id;
-            unit.state = 'engaging';
-            currentClaims.set(closest.id, (currentClaims.get(closest.id) || 0) + 1);
-          }
-        }
-      } else if (unit.state === 'engaging') {
+      if (unit.targetId) {
         const target = this.state.enemies.find(e => e.id === unit.targetId);
-        if (!target || target.isConverted || (!isCavalry && hexDistance(city.hex, target.hex) > baseRadius)) {
-          unit.state = 'returning';
-          unit.targetId = null;
-        } else {
+        if (target) {
           const dx = target.x - unit.x;
           const dy = target.y - unit.y;
           const dist = Math.hypot(dx, dy);
-          if (dist < 5) {
-            unit.state = 'melee';
-          } else {
+          if (dist > 5) {
             unit.x += (dx / dist) * actualSpeed * dt;
             unit.y += (dy / dist) * actualSpeed * dt;
-          }
-        }
-      } else if (unit.state === 'melee') {
-        const target = this.state.enemies.find(e => e.id === unit.targetId);
-        if (!target || target.isConverted) {
-          if (isCavalry) {
-            if (unit.hp > unit.maxHp * 0.5) {
-              unit.state = 'idle';
-            } else {
-              unit.state = 'returning';
-            }
           } else {
-            unit.state = 'returning';
+            // Physical reach - deal damage
+            target.hp -= damage * dt;
+            if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
+            // Target deals damage back to guard (feedback)
+            unit.hp -= target.damage * 0.5 * dt;
+            if (Math.random() < dt * 10) this.spawnSparks(unit.x, unit.y, isCavalry ? '#22c55e' : '#4287f5', 1);
+            if (unit.hp <= 0) return false;
           }
-          unit.targetId = null;
-        } else {
-          // Deal damage to target
-          target.hp -= damage * dt;
-          if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
-          // Target deals damage to guard
-          unit.hp -= target.damage * dt;
-          if (Math.random() < dt * 10) this.spawnSparks(unit.x, unit.y, isCavalry ? '#22c55e' : '#4287f5', 1);
-          if (unit.hp <= 0) return false;
         }
-      } else if (unit.state === 'returning') {
+        unit.state = 'engaging';
+      } else {
         const dx = cityPos.x - unit.x;
         const dy = cityPos.y - unit.y;
         const dist = Math.hypot(dx, dy);
-        if (dist < 15) {
-          if (isCavalry && unit.hp < unit.maxHp) {
+        
+        if (dist > 15) {
+          unit.state = 'returning';
+          unit.x += (dx / dist) * actualSpeed * dt;
+          unit.y += (dy / dist) * actualSpeed * dt;
+        } else {
+          if (unit.hp < unit.maxHp && isCavalry) {
             unit.state = 'healing';
           } else {
             unit.state = 'idle';
           }
-        } else {
-          unit.x += (dx / dist) * actualSpeed * dt;
-          unit.y += (dy / dist) * actualSpeed * dt;
-        }
-      } else if (unit.state === 'healing') {
-        unit.hp = Math.min(unit.maxHp, unit.hp + 10 * dt);
-        unit.angle += dt * 2;
-        const targetX = cityPos.x + Math.cos(unit.angle) * 12;
-        const targetY = cityPos.y + Math.sin(unit.angle) * 12;
-        unit.x += (targetX - unit.x) * 5 * dt;
-        unit.y += (targetY - unit.y) * 5 * dt;
-        
-        if (unit.hp >= unit.maxHp) {
-          unit.state = 'idle';
+
+          unit.hp = Math.min(unit.maxHp, unit.hp + (unit.state === 'healing' ? 10 : 5) * dt);
+          
+          if (isCavalry) {
+            unit.angle += dt * (this.hasFusion('WarChariots') ? 1.5 : 1.0);
+            const orbitRadius = 4.0 * HEX_SIZE; 
+            const targetX = cityPos.x + Math.cos(unit.angle) * orbitRadius;
+            const targetY = cityPos.y + Math.sin(unit.angle) * orbitRadius;
+            
+            const mdx = targetX - unit.x;
+            const mdy = targetY - unit.y;
+            const mdist = Math.hypot(mdx, mdy);
+            if (mdist > 0) {
+              const moveDist = Math.min(mdist, actualSpeed * dt);
+              unit.x += (mdx / mdist) * moveDist;
+              unit.y += (mdy / mdist) * moveDist;
+            }
+          } else {
+            unit.angle += dt * 2;
+            const targetX = cityPos.x + Math.cos(unit.angle) * 12;
+            const targetY = cityPos.y + Math.sin(unit.angle) * 12;
+            unit.x += (targetX - unit.x) * 5 * dt;
+            unit.y += (targetY - unit.y) * 5 * dt;
+          }
         }
       }
       return true;
@@ -624,6 +699,20 @@ export class GameEngine {
       return true;
     });
 
+    const cityPatrolDamage = new Map<string, number>();
+    for (const city of this.state.cities) { cityPatrolDamage.set(city.id, 0); }
+    for (const unit of this.state.friendlyUnits) {
+      if (unit.state === 'idle' || unit.state === 'healing') {
+        const city = this.state.cities.find(c => c.id === unit.cityId);
+        if (!city) continue;
+        const tile = this.state.tiles.get(hexToString(city.hex));
+        const isCavalry = unit.type === 'cavalry';
+        const hillBonus = (this.hasTech('Mining') && tile?.terrain === Terrain.Hills) ? 1.5 : 1.0;
+        const damage = (isCavalry ? (this.hasFusion('WarChariots') ? 30 : 10) : 15) * dmgMult * hillBonus;
+        cityPatrolDamage.set(unit.cityId, (cityPatrolDamage.get(unit.cityId) || 0) + damage);
+      }
+    }
+
     for (const enemy of this.state.enemies) {
       if (enemy.isConverted) continue;
       const cost = this.costs.get(hexToString(enemy.hex));
@@ -635,6 +724,12 @@ export class GameEngine {
           city.hp -= dmg;
           city.timeSinceLastDamage = 0;
           
+          const patrolDmg = cityPatrolDamage.get(city.id) || 0;
+          if (patrolDmg > 0) {
+            enemy.hp -= patrolDmg * 0.5 * dt; // Patrol feedback damage
+            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+          }
+
           const pos = hexToPixel(city.hex, HEX_SIZE);
           if (Math.random() < dt * 10) this.spawnSparks(pos.x, pos.y, '#ffffff', 1);
         }

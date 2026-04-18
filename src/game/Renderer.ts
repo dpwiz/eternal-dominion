@@ -68,10 +68,18 @@ export class Renderer {
       this.ctx.stroke();
     }
 
+    const hasWarChariots = state.fusions.includes('WarChariots');
+
     // Draw friendly units
     for (const unit of state.friendlyUnits) {
       this.ctx.beginPath();
-      this.ctx.arc(unit.x, unit.y, unit.type === 'cavalry' ? 5 : 4, 0, Math.PI * 2);
+      
+      let unitSize = 1;
+      if (unit.type === 'guard') unitSize = 2;
+      else if (unit.type === 'cavalry') unitSize = (unit.cavalryIndex ?? 0) + 1 + (hasWarChariots ? 1 : 0);
+      const radius = unitSize === 1 ? 4 : (unitSize === 2 ? 6 : 8);
+      
+      this.ctx.arc(unit.x, unit.y, radius, 0, Math.PI * 2);
       this.ctx.fillStyle = unit.type === 'cavalry' ? '#22c55e' : '#4287f5';
       this.ctx.fill();
       this.ctx.strokeStyle = '#000';
@@ -80,7 +88,7 @@ export class Renderer {
 
       if (unit.hp < unit.maxHp) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(unit.x - 4, unit.y - 8, 8 * (unit.hp / unit.maxHp), 2);
+        this.ctx.fillRect(unit.x - radius, unit.y - radius - 4, radius * 2 * (unit.hp / unit.maxHp), 2);
       }
     }
 
@@ -119,14 +127,18 @@ export class Renderer {
 
     for (const enemy of state.enemies) {
       this.ctx.beginPath();
-      this.ctx.arc(enemy.x, enemy.y, 6, 0, Math.PI * 2);
-      this.ctx.fillStyle = enemy.isConverted ? '#00ffff' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
+      
+      const size = enemy.type === 'Scout' ? 1 : (enemy.type === 'Warrior' ? 2 : 3);
+      const radius = size === 1 ? 4 : (size === 2 ? 6 : 8);
+
+      this.ctx.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = enemy.isConverted ? '#38bdf8' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
       this.ctx.fill();
-      this.ctx.strokeStyle = '#000';
+      this.ctx.strokeStyle = enemy.isConverted ? '#0284c7' : '#000';
       this.ctx.stroke();
 
-      this.ctx.fillStyle = '#ff0000';
-      this.ctx.fillRect(enemy.x - 6, enemy.y - 10, 12 * (enemy.hp / enemy.maxHp), 3);
+      this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
+      this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
     }
 
     this.ctx.restore();
