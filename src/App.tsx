@@ -21,6 +21,8 @@ export default function App() {
   const rendererRef = useRef<Renderer | null>(null);
   
   const [gameState, setGameState] = useState<GameState | null>(null);
+  const [, forceRender] = useState(0);
+
   const activeHexRef = useRef<Hex | null>(null);
   const requestRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
@@ -49,6 +51,7 @@ export default function App() {
       campaignEngineRef.current = new CampaignEngine(1337);
       campaignRendererRef.current = new CampaignRenderer(canvas);
       rendererRef.current = new Renderer(canvas);
+      forceRender(v => v + 1);
     }
     
     handleResize();
