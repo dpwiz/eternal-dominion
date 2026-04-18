@@ -144,7 +144,7 @@ export class GameEngine {
       this.state.phase = 'PLAYING';
     }
     this.updateFlowField();
-    this.notify();
+    this.notify(true);
     return true;
   }
 
@@ -152,7 +152,7 @@ export class GameEngine {
   hasFusion(id: string) { return this.state.fusions.includes(id); }
 
   getEnemySize(type: 'Scout' | 'Warrior' | 'Brute'): number {
-    return type === 'Scout' ? 1 : (type === 'Warrior' ? 2 : 3);
+    return type === 'Scout' ? 1 : (type === 'Warrior' ? 2 : 4);
   }
 
   getFriendlySize(unit: import('./Types').FriendlyUnit): number {
@@ -246,7 +246,7 @@ export class GameEngine {
     const hostileEnemies = this.state.enemies.filter(e => !e.isConverted).length;
     if (this.state.time >= 400 && hostileEnemies === 0) {
       this.state.phase = 'VICTORY';
-      this.notify();
+      this.notify(true);
       return;
     }
 
@@ -274,7 +274,7 @@ export class GameEngine {
     this.updateParticles(dt);
     this.checkLevelUp();
 
-    this.notify();
+    this.notify(this.state.phase !== 'PLAYING');
   }
 
   spawnSparks(x: number, y: number, color: string, count: number = 5) {
@@ -800,7 +800,7 @@ export class GameEngine {
     if (this.state.pendingTechPicks.length === 0) {
       this.state.phase = 'PLAYING';
     }
-    this.notify();
+    this.notify(true);
   }
 
   onTurnChange(turn: number) {
@@ -812,20 +812,26 @@ export class GameEngine {
     }
   }
 
-  notify() {
+  lastNotifyTime = 0;
+
+  notify(force: boolean = false) {
     if (this.onStateChange) {
-      this.onStateChange({ ...this.state });
+      const now = performance.now();
+      if (force || now - this.lastNotifyTime > 66) { // ~15 FPS
+        this.onStateChange({ ...this.state });
+        this.lastNotifyTime = now;
+      }
     }
   }
 
   instaWin() {
     this.state.phase = 'VICTORY';
     this.state.enemies = [];
-    this.notify();
+    this.notify(true);
   }
 
   instaLose() {
     this.state.phase = 'GAME_OVER';
-    this.notify();
+    this.notify(true);
   }
 }
