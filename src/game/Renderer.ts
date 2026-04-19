@@ -1,5 +1,5 @@
 import { GameState, Terrain } from './Types';
-import { hexToPixel } from './HexMath';
+import { hexToPixel, hexToString } from './HexMath';
 import { HEX_SIZE } from './Engine';
 
 export class Renderer {
@@ -38,6 +38,33 @@ export class Renderer {
 
       this.drawHex(pos.x, pos.y, HEX_SIZE - 1, color);
 
+      if (tile.improvementLevel === 1) {
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        this.ctx.beginPath();
+        this.ctx.arc(pos.x, pos.y, HEX_SIZE * 0.4, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        this.ctx.lineWidth = 1;
+        this.ctx.stroke();
+      }
+
+      if (state.focusedHex === hexToString(tile.hex)) {
+        this.ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 6;
+          const hx = pos.x + (HEX_SIZE - 2) * Math.cos(angle);
+          const hy = pos.y + (HEX_SIZE - 2) * Math.sin(angle);
+          if (i === 0) this.ctx.moveTo(hx, hy);
+          else this.ctx.lineTo(hx, hy);
+        }
+        this.ctx.closePath();
+        this.ctx.strokeStyle = '#fbbf24'; // amber-400
+        this.ctx.lineWidth = 3;
+        this.ctx.setLineDash([4, 2]);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+      }
+
       if (tile.borderType === 'safe') {
         this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
         this.ctx.fill();
@@ -54,18 +81,43 @@ export class Renderer {
     }
 
     for (const city of state.cities) {
+      const tile = state.tiles.get(hexToString(city.hex));
       const pos = hexToPixel(city.hex, HEX_SIZE);
       this.drawHex(pos.x, pos.y, HEX_SIZE, '#ffffff');
       this.ctx.fillStyle = '#ff0000';
       this.ctx.fillRect(pos.x - 10, pos.y - 15, 20 * (city.hp / city.maxHp), 4);
 
-      const radius = state.techs.includes('Exploration') ? 4 : 2;
-      this.ctx.beginPath();
-      this.ctx.arc(pos.x, pos.y, radius * HEX_SIZE * 1.5, 0, Math.PI * 2);
-      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-      this.ctx.fill();
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-      this.ctx.stroke();
+      if (tile) {
+         if (tile.terrain === Terrain.Plains) this.ctx.strokeStyle = '#a3d977';
+         else if (tile.terrain === Terrain.Hills) this.ctx.strokeStyle = '#d9b377';
+         else if (tile.terrain === Terrain.Forest) this.ctx.strokeStyle = '#4d8c39';
+         else this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+
+         let drawRadius = HEX_SIZE * 1.75;
+         if (tile.terrain === Terrain.Plains) {
+            let r = 0;
+            if (state.techs.includes('HorsebackRiding')) r += 1;
+            if (state.techs.includes('AnimalHusbandry')) r += 1;
+            if (state.fusions.includes('SwiftRiders')) r += 1;
+            drawRadius = HEX_SIZE * (1 + r * 1.5);
+         } else if (tile.terrain === Terrain.Hills) {
+            let r = 0;
+            if (state.techs.includes('Archery')) r += 1;
+            if (state.techs.includes('Crossbows')) r += 1;
+            if (state.fusions.includes('MountainFortress')) r += 1;
+            drawRadius = HEX_SIZE * (1 + r * 1.5);
+         } else if (tile.terrain === Terrain.Forest) {
+            let r = 0;
+            if (state.techs.includes('Mysticism')) r += 1;
+            if (state.techs.includes('Animism')) r += 1;
+            if (state.fusions.includes('Theology')) r += 1;
+            drawRadius = HEX_SIZE * (1 + r * 1.5);
+         }
+         this.ctx.beginPath();
+         this.ctx.arc(pos.x, pos.y, drawRadius, 0, Math.PI * 2);
+         this.ctx.lineWidth = 1;
+         this.ctx.stroke();
+      }
     }
 
     const hasWarChariots = state.fusions.includes('WarChariots');
@@ -76,11 +128,27 @@ export class Renderer {
       
       let unitSize = 1;
       if (unit.type === 'guard') unitSize = 2;
-      else if (unit.type === 'cavalry') unitSize = (unit.cavalryIndex ?? 0) + 1 + (hasWarChariots ? 1 : 0);
-      const radius = unitSize === 1 ? 4 : (unitSize === 2 ? 6 : 8);
+      else if (unit.type === 'cavalry') {
+         const idx = unit.cavalryIndex ?? 0;
+         if (idx === 0) unitSize = 1;
+         else if (idx === 1) unitSize = 2;
+         else unitSize = 4;
+      }
+      else if (unit.type === 'mystic') {
+         if (state.fusions.includes('Theology')) unitSize = 4;
+         else if (state.techs.includes('Animism')) unitSize = 2;
+         else unitSize = 1;
+      }
+      const radius = unitSize <= 1 ? 4 : (unitSize === 2 ? 6 : 8);
       
       this.ctx.arc(unit.x, unit.y, radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = unit.type === 'cavalry' ? '#22c55e' : '#4287f5';
+
+      let fillColor = '#4287f5'; // guard
+      if (unit.type === 'cavalry') fillColor = '#22c55e';
+      else if (unit.type === 'archer') fillColor = '#eab308'; // yellow-500
+      else if (unit.type === 'mystic') fillColor = '#a855f7'; // purple-500
+
+      this.ctx.fillStyle = fillColor;
       this.ctx.fill();
       this.ctx.strokeStyle = '#000';
       this.ctx.lineWidth = 1;

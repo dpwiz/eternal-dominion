@@ -1,7 +1,8 @@
 import React from 'react';
-import { GameState } from '../game/Types';
+import { GameState, Terrain } from '../game/Types';
 import { ALL_TECHS, FUSIONS } from '../game/Content';
 import { getWaveEnemiesText } from '../game/Engine';
+import { hexToString } from '../game/HexMath';
 
 interface GameUIProps {
   state: GameState;
@@ -20,13 +21,56 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
   const nextTurn = state.turn + 1;
   const nextWaveEnemies = getWaveEnemiesText(nextTurn, threatLevel);
 
+  const getTerrainName = (t?: Terrain) => {
+    switch (t) {
+      case Terrain.Plains: return 'Plains';
+      case Terrain.Hills: return 'Hills';
+      case Terrain.Forest: return 'Forest';
+      case Terrain.Mountains: return 'Mountains';
+      default: return 'Unknown';
+    }
+  };
+
+  const getTerrainColor = (t?: Terrain) => {
+    switch (t) {
+      case Terrain.Plains: return 'text-[#a3d977]';
+      case Terrain.Hills: return 'text-[#d9b377]';
+      case Terrain.Forest: return 'text-[#4d8c39]';
+      case Terrain.Mountains: return 'text-slate-400';
+      default: return 'text-slate-300';
+    }
+  };
+
+  const sortedCities = [...state.cities].sort((a, b) => {
+    const tileA = state.tiles.get(hexToString(a.hex));
+    const tileB = state.tiles.get(hexToString(b.hex));
+    const typeA = tileA?.terrain ?? -1;
+    const typeB = tileB?.terrain ?? -1;
+    if (typeA !== typeB) return typeA - typeB;
+    return b.size - a.size;
+  });
+
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col">
       {/* Top Bar */}
       <div className="bg-slate-900/80 text-white p-4 flex justify-between items-center pointer-events-auto">
-        <div className="flex flex-col">
-          <span className="text-xl font-bold">Wave {state.turn} / 40</span>
-          <span className="text-sm text-slate-300">Phase: {state.phase}</span>
+        <div className="flex gap-8 items-center">
+          <div className="flex flex-col">
+            <span className="text-xl font-bold">Wave {state.turn} / 40</span>
+            <span className="text-sm text-slate-300">Phase: {state.phase}</span>
+          </div>
+
+          {state.turn < 40 && state.phase === 'PLAYING' && (
+            <div className="flex flex-col w-32 border-l border-slate-700 pl-8">
+              <span className="text-xs text-slate-400 font-bold tracking-wider mb-1">NEXT WAVE IN</span>
+              <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden mt-1">
+                <div 
+                  className="bg-purple-500 h-full" 
+                  style={{ width: `${(timeToNextWave / 10) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="flex flex-col items-center w-1/3">
@@ -39,96 +83,26 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
           </div>
           <span className="text-xs text-slate-400 mt-1">{Math.floor(state.xp)} / {state.xpToNext} XP</span>
         </div>
-
-        <div className="flex gap-4">
-          <div className="flex flex-col items-end">
-            <span className="text-sm text-slate-300">Outposts</span>
-            <span className="text-xl font-bold">{state.cities.length}</span>
-          </div>
-          <div className="flex flex-col items-end">
-            <span className="text-sm text-slate-300">Settlers</span>
-            <span className="text-xl font-bold text-green-400">{state.availableCities}</span>
-          </div>
-        </div>
       </div>
 
-      {/* Acquired Techs & Fusions Panel */}
-      {(acquiredTechs.length > 0 || acquiredFusions.length > 0) && (
-        <div className="absolute left-4 top-24 w-64 bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto max-h-[calc(100vh-8rem)] overflow-y-auto flex flex-col gap-4 border border-slate-700 shadow-xl">
-          {acquiredFusions.length > 0 && (
-            <div>
-              <h3 className="text-lg font-bold text-yellow-400 mb-2 border-b border-slate-700 pb-1">Fusions</h3>
-              <ul className="flex flex-col gap-3">
-                {acquiredFusions.map(f => (
-                  <li key={f!.id} className="text-sm">
-                    <span className="font-semibold text-yellow-300 block">{f!.name}</span>
-                    <span className="text-slate-400 text-xs">{f!.description}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          
-          {acquiredTechs.length > 0 && (
-            <div>
-              <h3 className="text-lg font-bold text-blue-400 mb-2 border-b border-slate-700 pb-1">Developments</h3>
-              <ul className="flex flex-col gap-3">
-                {acquiredTechs.map(t => (
-                  <li key={t!.id} className="text-sm">
-                    <span className="font-semibold text-blue-300 block">{t!.name}</span>
-                    <span className="text-slate-400 text-xs">{t!.description}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Right Side Panels */}
-      <div className="absolute right-4 top-24 flex flex-col gap-4 max-h-[calc(100vh-8rem)] overflow-y-auto pointer-events-none w-64">
-        {/* Calendar Panel */}
-        {hasCalendar && state.phase === 'PLAYING' && (
-          <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0">
-            <h3 className="text-lg font-bold text-purple-400 mb-2 border-b border-slate-700 pb-1">Calendar</h3>
-            <div className="flex flex-col gap-2">
-              {state.turn < 40 ? (
-                <>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400 text-sm">Next Wave In:</span>
-                    <span className="font-mono font-bold text-lg">{timeToNextWave.toFixed(1)}s</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-slate-400 text-sm">Incoming Threats:</span>
-                    <span className="text-sm font-semibold text-red-400">{nextWaveEnemies}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-2">
-                  <span className="text-red-500 font-bold text-lg animate-pulse">FINAL WAVE</span>
-                  <span className="text-slate-400 text-sm mt-1">Clear remaining enemies</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
+      {/* Left Side Panels */}
+      <div className="absolute left-4 top-24 flex flex-col gap-4 max-h-[calc(100vh-8rem)] overflow-y-auto pointer-events-none w-64">
         {/* City Readouts */}
         {state.cities.length > 0 && (
           <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0">
-            <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Outposts</h3>
-            <div className="flex flex-col gap-4">
-              {state.cities.map((city, index) => {
+            <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Outposts: {state.cities.length}</h3>
+            <div className="flex flex-col gap-2">
+              {sortedCities.map((city, index) => {
+                const tile = state.tiles.get(hexToString(city.hex));
+                const terrainName = getTerrainName(tile?.terrain);
+                const terrainColor = getTerrainColor(tile?.terrain);
                 const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && u.type === 'guard').length;
                 const maxDefenders = Math.min(6, city.size);
                 return (
                   <div key={city.id} className="flex flex-col text-sm">
-                    <div className="flex justify-between font-semibold text-slate-200">
-                      <span>Outpost {index + 1}</span>
-                      <span className="text-blue-300">Size {city.size}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-400 text-xs mt-1">
+                    <div className="flex justify-between items-center text-slate-400 text-xs mt-1">
                       <span>HP: {Math.floor(city.hp)}/{city.maxHp}</span>
+                      <span className={`font-medium px-2 ${terrainColor}`}>{terrainName}</span>
                       <span>Guards: {defenders}/{maxDefenders}</span>
                     </div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-1 overflow-hidden">
@@ -145,6 +119,62 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
         )}
       </div>
 
+      {/* Right Side Panels */}
+      <div className="absolute right-4 top-24 flex flex-col gap-4 max-h-[calc(100vh-8rem)] overflow-y-auto pointer-events-none w-64">
+        {/* Calendar Panel */}
+        {hasCalendar && state.phase === 'PLAYING' && (
+          <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0">
+            <h3 className="text-lg font-bold text-purple-400 mb-2 border-b border-slate-700 pb-1">Threat Assessment</h3>
+            <div className="flex flex-col gap-2">
+              {state.turn < 40 ? (
+                <div className="flex flex-col">
+                  <span className="text-slate-400 text-sm">Approaching Horde:</span>
+                  <span className="text-sm font-semibold text-red-400 mt-1">{nextWaveEnemies}</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-2">
+                  <span className="text-red-500 font-bold text-lg animate-pulse">FINAL WAVE</span>
+                  <span className="text-slate-400 text-sm mt-1">Clear remaining enemies</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Acquired Techs & Fusions Panel */}
+        {(acquiredTechs.length > 0 || acquiredFusions.length > 0) && (
+          <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0 flex flex-col gap-4">
+            {acquiredFusions.length > 0 && (
+              <div>
+                <h3 className="text-lg font-bold text-yellow-400 mb-2 border-b border-slate-700 pb-1">Fusions: {acquiredFusions.length}</h3>
+                <ul className="flex flex-col gap-3">
+                  {acquiredFusions.map(f => (
+                    <li key={f!.id} className="text-sm">
+                      <span className="font-semibold text-yellow-300 block">{f!.name}</span>
+                      <span className="text-slate-400 text-xs">{f!.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {acquiredTechs.length > 0 && (
+              <div>
+                <h3 className="text-lg font-bold text-blue-400 mb-2 border-b border-slate-700 pb-1">Developments: {acquiredTechs.length}</h3>
+                <ul className="flex flex-col gap-3">
+                  {acquiredTechs.map(t => (
+                    <li key={t!.id} className="text-sm">
+                      <span className="font-semibold text-blue-300 block">{t!.name}</span>
+                      <span className="text-slate-400 text-xs">{t!.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Prompts */}
       {state.phase === 'START' && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
@@ -152,9 +182,9 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
         </div>
       )}
 
-      {state.phase === 'PLAYING' && state.availableCities > 0 && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
-          Click to place a new Outpost (must be 3 tiles away from others)
+      {state.phase === 'PLAYING' && !state.focusedHex && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
+          Select an adjacent tile to guide improvements
         </div>
       )}
 

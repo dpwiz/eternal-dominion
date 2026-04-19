@@ -11,13 +11,15 @@ export const ALL_TECHS: Tech[] = [
   { id: 'Writing', name: 'Combat Drills', description: '+25% XP gain' },
   { id: 'Exploration', name: 'Pathfinding', description: '+2 outpost engagement radius for Guards and Wards' },
   { id: 'AnimalHusbandry', name: 'Pack Tactics', description: 'Spawns a second cavalry unit per outpost' },
+  { id: 'Crossbows', name: 'Crossbows', description: 'Spawns an additional archer unit per outpost' },
+  { id: 'Animism', name: 'Animism', description: 'Mystic units grow in size and gain extra range' },
   { id: 'Pottery', name: 'Supply Caches', description: 'New outposts start with +50% HP' },
   { id: 'Calendar', name: 'Threat Assessment', description: 'Wave timer visible. Next wave preview shown.' }
 ];
 
 export const FUSIONS = [
   { id: 'Aqueducts', req: ['Irrigation', 'Masonry'], name: 'Sanctuary', description: 'Outposts regenerate 15 HP/sec and take 3 less damage per hit' },
-  { id: 'WarChariots', req: ['BronzeWorking', 'HorsebackRiding'], name: 'Swift Riders', description: 'Cavalry deals 3x damage, moves faster' },
-  { id: 'Theology', req: ['Writing', 'Mysticism'], name: 'Conversion Ritual', description: 'Burst damage converts 1 enemy to fight for you' },
-  { id: 'MountainFortress', req: ['Archery', 'Mining'], name: 'Eagles Nest', description: 'Outposts on hills gain 8-tile sniper shot, massive damage' }
+  { id: 'WarChariots', req: ['BronzeWorking', 'HorsebackRiding'], name: 'Swift Riders', description: 'Cavalry deals 3x damage, moves faster, adds a unit and extends range' },
+  { id: 'Theology', req: ['Writing', 'Mysticism'], name: 'Conversion Ritual', description: 'Burst damage converts enemies (50% chance, 100% with Animism)' },
+  { id: 'MountainFortress', req: ['Archery', 'Mining'], name: 'Eagles Nest', description: 'Spawns an additional archer and increases archer range' }
 ];

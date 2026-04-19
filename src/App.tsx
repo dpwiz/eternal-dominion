@@ -172,11 +172,11 @@ export default function App() {
       const engine = engineRef.current;
       const renderer = rendererRef.current;
 
-      if (engine.state.phase === 'START' || (engine.state.phase === 'PLAYING' && engine.state.availableCities > 0)) {
+      if (engine.state.phase === 'START' || engine.state.phase === 'PLAYING') {
         const worldX = (mousePosRef.current.x - renderer.camera.x) / renderer.camera.zoom;
         const worldY = (mousePosRef.current.y - renderer.camera.y) / renderer.camera.zoom;
         const hex = pixelToHex(worldX, worldY, HEX_SIZE);
-        engine.placeCity(hex);
+        engine.handleHexClick(hex);
       }
     }
   };
@@ -209,7 +209,7 @@ export default function App() {
 
   const getCampaignMessage = () => {
     if (!campaignEngineRef.current) return 'Claim territories to expand your village';
-    const hasCleared = Array.from(campaignEngineRef.current.tiles.values()).some(t => t.status === 'CLEARED');
+    const hasCleared = Array.from(campaignEngineRef.current.tiles.values()).some((t: any) => t.status === 'CLEARED');
     return hasCleared 
       ? 'Claim territories to expand your village' 
       : 'Make landfall and establish a foothold to expand your village';

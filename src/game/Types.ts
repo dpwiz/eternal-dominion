@@ -6,6 +6,7 @@ export interface Tile {
   hex: Hex;
   terrain: Terrain;
   borderType?: 'safe' | 'threat';
+  improvementLevel?: number; // 0, 1, 2
 }
 
 export interface City {
@@ -60,8 +61,10 @@ export interface Particle {
 export interface FriendlyUnit {
   id: string;
   cityId: string;
-  type: 'guard' | 'cavalry';
+  type: 'guard' | 'cavalry' | 'archer' | 'mystic';
   cavalryIndex?: number;
+  archerIndex?: number;
+  mysticIndex?: number;
   x: number;
   y: number;
   targetId: string | null;
@@ -69,6 +72,7 @@ export interface FriendlyUnit {
   angle: number;
   hp: number;
   maxHp: number;
+  cooldown?: number;
 }
 
 export interface GameState {
@@ -87,7 +91,7 @@ export interface GameState {
   level: number;
   xpToNext: number;
   phase: 'START' | 'PLAYING' | 'LEVEL_UP' | 'GAME_OVER' | 'VICTORY';
-  availableCities: number;
+  focusedHex: string | null;
   pendingTechPicks: Tech[][];
   stats: {
     threatsKilled: number;
