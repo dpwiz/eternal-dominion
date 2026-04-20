@@ -1,6 +1,6 @@
 import { GameState, Terrain } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
-import { HEX_SIZE } from './Engine';
+import { HEX_SIZE, MAP_RADIUS } from './Engine';
 
 export class Renderer {
   ctx: CanvasRenderingContext2D;
@@ -36,7 +36,11 @@ export class Renderer {
       if (tile.terrain === Terrain.Forest) color = '#4d8c39';
       if (tile.terrain === Terrain.Mountains) color = '#7a7a7a';
 
-      this.drawHex(pos.x, pos.y, HEX_SIZE - 1, color);
+      const isPlayArea = Math.max(Math.abs(tile.hex.q), Math.abs(tile.hex.r), Math.abs(tile.hex.s)) <= MAP_RADIUS;
+
+      if (isPlayArea) {
+        this.drawHex(pos.x, pos.y, HEX_SIZE - 1, color);
+      }
 
       if (tile.improvementLevel === 1) {
         this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
@@ -50,14 +54,7 @@ export class Renderer {
 
       if (state.focusedHex === hexToString(tile.hex)) {
         this.ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const angle = (Math.PI / 3) * i - Math.PI / 6;
-          const hx = pos.x + (HEX_SIZE - 2) * Math.cos(angle);
-          const hy = pos.y + (HEX_SIZE - 2) * Math.sin(angle);
-          if (i === 0) this.ctx.moveTo(hx, hy);
-          else this.ctx.lineTo(hx, hy);
-        }
-        this.ctx.closePath();
+        this.drawHexPath(pos.x, pos.y, HEX_SIZE - 2);
         this.ctx.strokeStyle = '#fbbf24'; // amber-400
         this.ctx.lineWidth = 3;
         this.ctx.setLineDash([4, 2]);
@@ -65,16 +62,18 @@ export class Renderer {
         this.ctx.setLineDash([]);
       }
 
-      if (tile.borderType === 'safe') {
-        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
-        this.ctx.fill();
-        this.ctx.strokeStyle = 'rgba(2, 132, 199, 0.5)'; // sky-600
-        this.ctx.lineWidth = 2;
-        this.ctx.stroke();
-      } else if (tile.borderType === 'threat') {
-        this.ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; // red-500
-        this.ctx.fill();
-        this.ctx.strokeStyle = 'rgba(185, 28, 28, 0.5)'; // red-700
+      if (tile.borderType) {
+        this.ctx.beginPath();
+        this.drawHexPath(pos.x, pos.y, HEX_SIZE - 1);
+        if (tile.borderType === 'safe') {
+          this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
+          this.ctx.fill();
+          this.ctx.strokeStyle = 'rgba(2, 132, 199, 0.5)'; // sky-600
+        } else {
+          this.ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; // red-500
+          this.ctx.fill();
+          this.ctx.strokeStyle = 'rgba(185, 28, 28, 0.5)'; // red-700
+        }
         this.ctx.lineWidth = 2;
         this.ctx.stroke();
       }
@@ -84,8 +83,11 @@ export class Renderer {
       const tile = state.tiles.get(hexToString(city.hex));
       const pos = hexToPixel(city.hex, HEX_SIZE);
       this.drawHex(pos.x, pos.y, HEX_SIZE, '#ffffff');
-      this.ctx.fillStyle = '#ff0000';
-      this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city.hp / city.maxHp), 4);
+
+      if (city.hp < city.maxHp) {
+        this.ctx.fillStyle = '#ff0000';
+        this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city.hp / city.maxHp), 4);
+      }
 
       if (tile) {
          if (tile.terrain === Terrain.Plains) this.ctx.strokeStyle = '#a3d977';
@@ -205,15 +207,16 @@ export class Renderer {
       this.ctx.strokeStyle = enemy.isConverted ? '#0284c7' : '#000';
       this.ctx.stroke();
 
-      this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
-      this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
+      if (enemy.hp < enemy.maxHp) {
+        this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
+        this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
+      }
     }
 
     this.ctx.restore();
   }
 
-  drawHex(x: number, y: number, size: number, color: string) {
-    this.ctx.beginPath();
+  drawHexPath(x: number, y: number, size: number) {
     for (let i = 0; i < 6; i++) {
       const angle = (Math.PI / 3) * i - Math.PI / 6;
       const hx = x + size * Math.cos(angle);
@@ -222,6 +225,11 @@ export class Renderer {
       else this.ctx.lineTo(hx, hy);
     }
     this.ctx.closePath();
+  }
+
+  drawHex(x: number, y: number, size: number, color: string) {
+    this.ctx.beginPath();
+    this.drawHexPath(x, y, size);
     this.ctx.fillStyle = color;
     this.ctx.fill();
     this.ctx.strokeStyle = 'rgba(0,0,0,0.2)';

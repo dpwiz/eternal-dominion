@@ -114,18 +114,23 @@ export class GameEngine {
       { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
     ];
 
-    for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
-      for (let r = Math.max(-MAP_RADIUS, -q - MAP_RADIUS); r <= Math.min(MAP_RADIUS, -q + MAP_RADIUS); r++) {
+    for (let q = -(MAP_RADIUS + 1); q <= MAP_RADIUS + 1; q++) {
+      for (let r = Math.max(-(MAP_RADIUS + 1), -q - (MAP_RADIUS + 1)); r <= Math.min(MAP_RADIUS + 1, -q + (MAP_RADIUS + 1)); r++) {
         const s = -q - r;
         const hex = { q, r, s };
         
-        const isEdge = Math.abs(q) === MAP_RADIUS || Math.abs(r) === MAP_RADIUS || Math.abs(s) === MAP_RADIUS;
+        const isPlayArea = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= MAP_RADIUS;
+        const isEdge = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) === MAP_RADIUS + 1;
         
         let terrain = Terrain.Plains;
-        const rand = Math.random();
-        if (rand < 0.05) terrain = Terrain.Mountains;
-        else if (rand < 0.20) terrain = Terrain.Hills;
-        else if (rand < 0.40) terrain = Terrain.Forest;
+        if (isPlayArea) {
+          const rand = Math.random();
+          if (rand < 0.05) terrain = Terrain.Mountains;
+          else if (rand < 0.20) terrain = Terrain.Hills;
+          else if (rand < 0.40) terrain = Terrain.Forest;
+        } else {
+          terrain = Terrain.Mountains; // make edge inherently impassable for placement normally
+        }
 
         let borderType: 'safe' | 'threat' | undefined = undefined;
 
@@ -432,13 +437,53 @@ export class GameEngine {
     });
   }
 
+  getRandomEdgeSpawnPos(spawnHex: Hex): {x: number, y: number} {
+    const insideNeighbors = [];
+    for (let i = 0; i < 6; i++) {
+        const nHex = hexNeighbor(spawnHex, i);
+        if (Math.max(Math.abs(nHex.q), Math.abs(nHex.r), Math.abs(nHex.s)) <= MAP_RADIUS) {
+            insideNeighbors.push(nHex);
+        }
+    }
+    
+    if (insideNeighbors.length === 0) {
+        return hexToPixel(spawnHex, HEX_SIZE);
+    }
+    
+    const nHex = insideNeighbors[Math.floor(Math.random() * insideNeighbors.length)];
+    const p0 = hexToPixel(spawnHex, HEX_SIZE);
+    const p1 = hexToPixel(nHex, HEX_SIZE);
+    
+    const mx = (p0.x + p1.x) / 2;
+    const my = (p0.y + p1.y) / 2;
+    
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const dist = Math.hypot(dx, dy);
+    
+    if (dist === 0) return p0;
+
+    const vx = dx / dist;
+    const vy = dy / dist;
+    
+    const px = -vy;
+    const py = vx;
+    
+    const randomOffset = (Math.random() - 0.5) * HEX_SIZE;
+    
+    return {
+        x: mx + px * randomOffset,
+        y: my + py * randomOffset
+    };
+  }
+
   spawnReinforcements() {
     if (this.safePoints.length === 0) return;
 
     const turn = this.state.turn;
     const type = 'Scout';
     const spawnHex = this.safePoints[Math.floor(Math.random() * this.safePoints.length)];
-    const pos = hexToPixel(spawnHex, HEX_SIZE);
+    const pos = this.getRandomEdgeSpawnPos(spawnHex);
 
     let hp = 20, speed = 1.6, damage = 2;
     hp *= (1 + turn * 0.1);
@@ -458,7 +503,7 @@ export class GameEngine {
 
     const turn = this.state.turn;
     const spawnHex = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
-    const pos = hexToPixel(spawnHex, HEX_SIZE);
+    const pos = this.getRandomEdgeSpawnPos(spawnHex);
 
     let hp = 20, speed = 1.5, damage = 1;
     if (type === 'Warrior') { hp = 50; speed = 1.0; damage = 2.5; }
