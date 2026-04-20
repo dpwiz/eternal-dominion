@@ -75,13 +75,13 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
         
         <div className="flex flex-col items-center w-1/3">
           <span className="text-sm font-semibold mb-1">Level {state.level}</span>
-          <div className="w-full bg-slate-700 h-4 rounded-full overflow-hidden">
+          <div className="w-full bg-slate-700 h-5 rounded-full overflow-hidden relative flex items-center justify-center">
             <div 
-              className="bg-blue-500 h-full transition-all duration-200" 
+              className="bg-blue-500 h-full transition-all duration-200 absolute left-0 top-0" 
               style={{ width: `${(state.xp / state.xpToNext) * 100}%` }}
             />
+            <span className="text-[11px] text-white font-bold tracking-wider z-10 drop-shadow-md">{Math.floor(state.xp)} / {state.xpToNext} XP</span>
           </div>
-          <span className="text-xs text-slate-400 mt-1">{Math.floor(state.xp)} / {state.xpToNext} XP</span>
         </div>
       </div>
 

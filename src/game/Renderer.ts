@@ -13,14 +13,14 @@ export class Renderer {
     this.width = canvas.width;
     this.height = canvas.height;
     this.camera.x = this.width / 2;
-    this.camera.y = this.height / 2;
+    this.camera.y = this.height / 2 + HEX_SIZE * Math.sqrt(3);
   }
 
   resize(width: number, height: number) {
     this.width = width;
     this.height = height;
     this.camera.x = this.width / 2;
-    this.camera.y = this.height / 2;
+    this.camera.y = this.height / 2 + HEX_SIZE * Math.sqrt(3);
   }
 
   draw(state: GameState) {
@@ -85,7 +85,7 @@ export class Renderer {
       const pos = hexToPixel(city.hex, HEX_SIZE);
       this.drawHex(pos.x, pos.y, HEX_SIZE, '#ffffff');
       this.ctx.fillStyle = '#ff0000';
-      this.ctx.fillRect(pos.x - 10, pos.y - 15, 20 * (city.hp / city.maxHp), 4);
+      this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city.hp / city.maxHp), 4);
 
       if (tile) {
          if (tile.terrain === Terrain.Plains) this.ctx.strokeStyle = '#a3d977';

@@ -2,8 +2,8 @@ import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hex
 import { GameState, Terrain, Enemy, Tech } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
 
-export const HEX_SIZE = 20;
-export const MAP_RADIUS = 12;
+export const HEX_SIZE = 26;
+export const MAP_RADIUS = 10;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -560,7 +560,7 @@ export class GameEngine {
             const dx = cp.x - enemy.x;
             const dy = cp.y - enemy.y;
             const dist = Math.hypot(dx, dy);
-            if (dist > 15) {
+            if (dist > HEX_SIZE * 0.5) {
               enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
               enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
               enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
@@ -868,7 +868,7 @@ export class GameEngine {
         const dy = cityPos.y - unit.y;
         const dist = Math.hypot(dx, dy);
         
-        if (dist > 15) {
+        if (dist > HEX_SIZE * 0.5) {
           unit.state = 'returning';
           unit.x += (dx / dist) * actualSpeed * dt;
           unit.y += (dy / dist) * actualSpeed * dt;
@@ -903,8 +903,8 @@ export class GameEngine {
             }
           } else {
             unit.angle += dt * 2;
-            const targetX = cityPos.x + Math.cos(unit.angle) * 12;
-            const targetY = cityPos.y + Math.sin(unit.angle) * 12;
+            const targetX = cityPos.x + Math.cos(unit.angle) * (HEX_SIZE * 0.6);
+            const targetY = cityPos.y + Math.sin(unit.angle) * (HEX_SIZE * 0.6);
             unit.x += (targetX - unit.x) * 5 * dt;
             unit.y += (targetY - unit.y) * 5 * dt;
           }
