@@ -54,12 +54,6 @@ export class CampaignRenderer {
 
       // Render borders / UI
       if (tile.status === 'CLAIMABLE') {
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        this.ctx.font = '12px Courier New';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(`Threat ${tile.threatLevel}`, pos.x, pos.y);
-        
         if (hoverHex === hexToString(tile.hex)) {
           this.ctx.beginPath();
           this.drawHexPath(pos.x, pos.y, this.HEX_SIZE - 2);
