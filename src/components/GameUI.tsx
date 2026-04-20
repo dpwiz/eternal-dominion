@@ -56,8 +56,9 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
       <div className="bg-slate-900/80 text-white p-4 flex justify-between items-center pointer-events-auto">
         <div className="flex gap-8 items-center">
           <div className="flex flex-col">
-            <span className="text-xl font-bold">Wave {state.turn} / 40</span>
-            <span className="text-sm text-slate-300">Phase: {state.phase}</span>
+            <span className="text-xl font-bold">Wave {Math.min(state.turn, 40)} / 40</span>
+            <span className="text-sm font-semibold text-blue-300">Supplies: {Math.max(0, state.supplies)}</span>
+            <span className="text-[10px] text-slate-500">Phase: {state.phase}</span>
           </div>
 
           {state.turn < 40 && state.phase === 'PLAYING' && (
@@ -190,9 +191,15 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
         </div>
       )}
 
-      {state.phase === 'PLAYING' && !state.focusedHex && (
+      {state.phase === 'PLAYING' && !state.focusedHex && state.supplies > 0 && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
           Select an adjacent tile to guide improvements
+        </div>
+      )}
+
+      {state.phase === 'PLAYING' && state.supplies <= 0 && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-red-600/80 text-white px-6 py-3 rounded-full font-bold shadow-lg border border-red-400 pointer-events-none">
+          No More Supplies
         </div>
       )}
 
@@ -225,7 +232,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
               {state.phase === 'VICTORY' ? 'VICTORY' : 'OUTPOSTS FALLEN'}
             </h2>
             <div className="text-slate-300 mb-8 flex flex-col gap-2">
-              <p>Survived until Wave: {state.turn}</p>
+              <p>Survived until Wave: {Math.min(state.turn, 40)}</p>
               <p>Beasts Killed: {state.stats.threatsKilled}</p>
               <p>Outposts Lost: {state.stats.citiesLost}</p>
               <p>Developments Acquired: {state.techs.length}</p>

@@ -93,6 +93,7 @@ export class GameEngine {
       engineers: [],
       techs: [],
       fusions: [],
+      supplies: 40,
       turn: 1,
       time: 0,
       spawnRates: { scout: 0, warrior: 0, brute: 0, reinforcement: 0 },
@@ -166,13 +167,14 @@ export class GameEngine {
     if (!tile || tile.terrain === Terrain.Mountains) return false;
 
     if (this.state.phase === 'START') {
+      this.state.supplies -= 1;
       this.createCity(hex);
       this.state.phase = 'PLAYING';
       this.updateFlowField();
       this.notify(true);
       return true;
     } else if (this.state.phase === 'PLAYING') {
-      if (this.state.turn >= 40) return false;
+      if (this.state.supplies <= 0) return false;
       if (tile.improvementLevel === 2) return false;
       
       let hasAdj = false;
@@ -331,7 +333,7 @@ export class GameEngine {
     this.state.time += dt;
     const currentTurn = Math.floor(this.state.time / 10) + 1;
 
-    if (currentTurn > this.state.turn && this.state.turn < 40) {
+    if (currentTurn > this.state.turn) {
       this.state.turn = currentTurn;
       this.onTurnChange(currentTurn);
     }
@@ -1246,10 +1248,6 @@ export class GameEngine {
   }
 
   onTurnChange(turn: number) {
-    if (turn >= 40) {
-       this.state.focusedHex = null; // drop focus frame so engineer goes home
-    }
-
     for (const city of this.state.cities) {
       city.size++;
     }
@@ -1258,8 +1256,11 @@ export class GameEngine {
       const tile = this.state.tiles.get(this.state.focusedHex);
       if (tile) {
         tile.improvementLevel = (tile.improvementLevel || 0) + 1;
+        this.state.supplies -= 1;
         if (tile.improvementLevel === 2) {
           this.createCity(tile.hex);
+          this.state.focusedHex = null;
+        } else if (this.state.supplies <= 0) {
           this.state.focusedHex = null;
         }
         this.updateFlowField();

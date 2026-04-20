@@ -97,6 +97,7 @@ export interface GameState {
   engineers: Engineer[];
   techs: string[];
   fusions: string[];
+  supplies: number;
   turn: number;
   time: number;
   spawnRates: { scout: number, warrior: number, brute: number, reinforcement: number };
