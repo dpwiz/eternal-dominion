@@ -1,0 +1,1091 @@
+import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound } from './HexMath';
+import { GameState, Terrain, Enemy, Tech } from './Types';
+import { ALL_TECHS, FUSIONS } from './Content';
+
+export const HEX_SIZE = 20;
+export const MAP_RADIUS = 12;
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+export function getWaveComposition(turn: number, threatLevel: number) {
+  let text = 'Scouts';
+  let scout = 0;
+  let warrior = 0;
+  let brute = 0;
+
+  let region = '';
+  let t = 0;
+  if (turn === 1) { region = 'start'; t = 0; }
+  else if (turn <= 12) { region = 'early'; t = (turn - 2) / 10; }
+  else if (turn <= 28) { region = 'mid'; t = (turn - 13) / 15; }
+  else if (turn <= 39) { region = 'end'; t = (turn - 29) / 10; }
+  else { region = 'final'; t = 1; }
+
+  // Clamp threatLevel for the generic patterns
+  const tl = Math.min(threatLevel, 3);
+  
+  if (tl === 0) {
+    if (region === 'start') { scout = 0.5; }
+    else if (region === 'early') { scout = lerp(0.5, 1.0, t); }
+    else if (region === 'mid') { scout = lerp(1.0, 1.5, t); }
+    else if (region === 'end') { scout = lerp(1.5, 0.0, t); warrior = lerp(0.0, 1.5, t); }
+    else { warrior = 3.0; }
+  } else if (tl === 1) {
+    if (region === 'start') { scout = 0.8; }
+    else if (region === 'early') { scout = lerp(0.8, 1.2, t); warrior = lerp(0.0, 0.5, t); }
+    else if (region === 'mid') { scout = lerp(1.2, 1.5, t); warrior = lerp(0.5, 1.0, t); }
+    else if (region === 'end') { scout = lerp(1.5, 0.0, t); warrior = lerp(1.0, 2.0, t); }
+    else { warrior = 3.0; brute = 1.0; }
+  } else if (tl === 2) {
+    if (region === 'start') { scout = 1.0; warrior = 0.5; }
+    else if (region === 'early') { scout = lerp(1.0, 1.5, t); warrior = lerp(0.5, 1.5, t); }
+    else if (region === 'mid') { scout = lerp(1.5, 2.0, t); warrior = lerp(1.5, 2.0, t); }
+    else if (region === 'end') { scout = lerp(2.0, 0.0, t); warrior = 2.0; brute = lerp(0.0, 0.5, t); }
+    else { warrior = 3.0; brute = 1.5; }
+  } else {
+    if (region === 'start') { scout = 1.5; warrior = 1.0; brute = 0.2; }
+    else if (region === 'early') { scout = lerp(1.5, 2.0, t); warrior = lerp(1.0, 1.5, t); brute = lerp(0.2, 0.5, t); }
+    else if (region === 'mid') { scout = lerp(2.0, 0.0, t); warrior = lerp(1.5, 2.0, t); brute = lerp(0.5, 1.0, t); }
+    else if (region === 'end') { warrior = lerp(2.0, 0.0, t); brute = lerp(1.0, 2.0, t); }
+    else { brute = 3.0; }
+  }
+
+  if (brute > 0 && warrior > 0 && scout > 0) text = 'Scouts, Warriors, Brutes';
+  else if (brute > 0 && warrior > 0) text = 'Warriors, Brutes';
+  else if (brute > 0) text = 'Massive Brute Swarm';
+  else if (warrior > 0 && scout > 0) text = 'Scouts, Warriors';
+  else if (warrior > 0) text = 'Warriors';
+  else text = 'Scouts';
+
+  scout *= 2;
+
+  return { scout, warrior, brute, text };
+}
+
+export class GameEngine {
+  state: GameState;
+  costs: Map<string, number> = new Map();
+  spawnPoints: Hex[] = [];
+  safePoints: Hex[] = [];
+  onStateChange?: (state: GameState) => void;
+  scoutSpawnTimer = 0;
+  warriorSpawnTimer = 0;
+  bruteSpawnTimer = 0;
+  reinforcementTimer = 0;
+  threatLevel: number;
+  safeEdges: boolean[];
+
+  constructor(threatLevel: number = 0, safeEdges: boolean[] = [false, false, false, false, false, false]) {
+    this.threatLevel = threatLevel;
+    this.safeEdges = safeEdges;
+    this.state = this.getInitialState();
+    this.generateMap();
+  }
+
+  getInitialState(): GameState {
+    return {
+      tiles: new Map(),
+      cities: [],
+      enemies: [],
+      friendlyUnits: [],
+      projectiles: [],
+      particles: [],
+      techs: [],
+      fusions: [],
+      turn: 1,
+      time: 0,
+      spawnRates: { scout: 0, warrior: 0, brute: 0, reinforcement: 0 },
+      currentSpawnRates: { scout: 0, warrior: 0, brute: 0, reinforcement: 0 },
+      xp: 0,
+      level: 1,
+      xpToNext: 100,
+      phase: 'START',
+      focusedHex: null,
+      pendingTechPicks: [],
+      stats: { threatsKilled: 0, citiesLost: 0, cumulativeXp: 0 }
+    };
+  }
+
+  generateMap() {
+    this.spawnPoints = [];
+    this.safePoints = [];
+    const _hexDirections = [
+      { q: 1, r: 0, s: -1 }, { q: 1, r: -1, s: 0 }, { q: 0, r: -1, s: 1 },
+      { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
+    ];
+
+    for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
+      for (let r = Math.max(-MAP_RADIUS, -q - MAP_RADIUS); r <= Math.min(MAP_RADIUS, -q + MAP_RADIUS); r++) {
+        const s = -q - r;
+        const hex = { q, r, s };
+        
+        const isEdge = Math.abs(q) === MAP_RADIUS || Math.abs(r) === MAP_RADIUS || Math.abs(s) === MAP_RADIUS;
+        
+        let terrain = Terrain.Plains;
+        const rand = Math.random();
+        if (rand < 0.05) terrain = Terrain.Mountains;
+        else if (rand < 0.20) terrain = Terrain.Hills;
+        else if (rand < 0.40) terrain = Terrain.Forest;
+
+        let borderType: 'safe' | 'threat' | undefined = undefined;
+
+        if (isEdge) {
+          const dots = _hexDirections.map(d => d.q * q + d.r * r + d.s * s);
+          const maxDot = Math.max(...dots);
+          
+          let isSafe = false;
+          for (let i = 0; i < 6; i++) {
+             if (dots[i] === maxDot && this.safeEdges[i]) {
+                isSafe = true;
+             }
+          }
+
+          if (isSafe) {
+             borderType = 'safe';
+             this.safePoints.push(hex);
+          } else {
+             borderType = 'threat';
+             this.spawnPoints.push(hex);
+          }
+        }
+
+        this.state.tiles.set(hexToString(hex), { hex, terrain, borderType, improvementLevel: 0 });
+      }
+    }
+  }
+
+  handleHexClick(hex: Hex) {
+    const key = hexToString(hex);
+    const tile = this.state.tiles.get(key);
+    if (!tile || tile.terrain === Terrain.Mountains) return false;
+
+    if (this.state.phase === 'START') {
+      this.createCity(hex);
+      this.state.phase = 'PLAYING';
+      this.updateFlowField();
+      this.notify(true);
+      return true;
+    } else if (this.state.phase === 'PLAYING') {
+      if (tile.improvementLevel === 2) return false;
+      
+      let hasAdj = false;
+      for (let i = 0; i < 6; i++) {
+        const nHex = hexNeighbor(hex, i);
+        const nTile = this.state.tiles.get(hexToString(nHex));
+        if (nTile && (nTile.improvementLevel || 0) >= 1) {
+          hasAdj = true;
+          break;
+        }
+      }
+      
+      if (!hasAdj) return false;
+      this.state.focusedHex = key;
+      this.notify(true);
+      return true;
+    }
+    return false;
+  }
+
+  createCity(hex: Hex) {
+    const key = hexToString(hex);
+    const tile = this.state.tiles.get(key);
+    if (tile) tile.improvementLevel = 2;
+
+    let maxHp = 100;
+    if (this.hasTech('Pottery')) maxHp += 50;
+    if (this.hasTech('Masonry')) maxHp += 50;
+
+    const cityId = Math.random().toString();
+    this.state.cities.push({
+      id: cityId,
+      hex,
+      hp: maxHp,
+      maxHp,
+      archeryCooldown: 0,
+      mysticismCooldown: 0,
+      timeSinceLastDamage: 0,
+      size: 1
+    });
+  }
+
+  hasTech(id: string) { return this.state.techs.includes(id); }
+  hasFusion(id: string) { return this.state.fusions.includes(id); }
+
+  getEnemySize(type: 'Scout' | 'Warrior' | 'Brute'): number {
+    return type === 'Scout' ? 1 : (type === 'Warrior' ? 2 : 4);
+  }
+
+  getFriendlySize(unit: import('./Types').FriendlyUnit): number {
+    if (unit.type === 'guard') return 2;
+    if (unit.type === 'cavalry') {
+      const idx = unit.cavalryIndex ?? 0;
+      if (idx === 0) return 1;
+      if (idx === 1) return 2;
+      return 4;
+    }
+    if (unit.type === 'mystic') {
+      if (this.hasFusion('Theology')) return 4;
+      if (this.hasTech('Animism')) return 2;
+      return 1;
+    }
+    if (unit.type === 'archer') return 1;
+    return 1;
+  }
+
+  assignTargets() {
+    const hostiles = this.state.enemies.filter(e => !e.isConverted);
+    const hostileSlots = new Map<string, number>();
+    const onOutpost = new Map<string, boolean>();
+
+    for (const e of hostiles) {
+        hostileSlots.set(e.id, 0);
+        onOutpost.set(e.id, this.costs.get(hexToString(e.hex)) === 0);
+    }
+
+    interface Attacker {
+        id: string; type: 'friendly'|'converted'; size: number;
+        x: number; y: number; cityId?: string; entity: any;
+    }
+    const attackers: Attacker[] = [];
+    for (const e of this.state.enemies) if (e.isConverted) attackers.push({ id: e.id, type: 'converted', size: this.getEnemySize(e.type), x: e.x, y: e.y, entity: e });
+    for (const u of this.state.friendlyUnits) {
+       if (u.type === 'archer' || u.type === 'mystic') continue;
+       attackers.push({ id: u.id, type: 'friendly', size: this.getFriendlySize(u), x: u.x, y: u.y, cityId: u.cityId, entity: u });
+    }
+
+    attackers.sort((a,b) => b.size - a.size);
+
+    const baseRadius = 1;
+
+    for (const att of attackers) {
+        let bestTarget: import('./Types').Enemy | null = null;
+        let bestDist = Infinity;
+
+        // 1. Same size (duel)
+        for (const h of hostiles) {
+            const hSize = this.getEnemySize(h.type);
+            const filled = hostileSlots.get(h.id)!;
+            if (hSize === att.size && hSize - filled >= att.size) {
+                if (att.type === 'friendly') {
+                    const city = this.state.cities.find(c => c.id === att.cityId);
+                    let range = baseRadius;
+                    if (att.entity.type === 'cavalry') {
+                       range = 1;
+                       if (this.hasTech('HorsebackRiding')) range += 1;
+                       if (this.hasTech('AnimalHusbandry')) range += 1;
+                       if (this.hasFusion('SwiftRiders')) range += 1;
+                    }
+                    if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > range) continue;
+                }
+                const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                if (dist < bestDist) { bestDist = dist; bestTarget = h; }
+            }
+        }
+
+        // 2. Larger size (harass)
+        if (!bestTarget) {
+            bestDist = Infinity;
+            for (const h of hostiles) {
+                const hSize = this.getEnemySize(h.type);
+                const filled = hostileSlots.get(h.id)!;
+                if (hSize > att.size && hSize - filled >= att.size) {
+                    if (att.type === 'friendly') {
+                        const city = this.state.cities.find(c => c.id === att.cityId);
+                        let range = baseRadius;
+                        if (att.entity.type === 'cavalry') {
+                           range = 1;
+                           if (this.hasTech('HorsebackRiding')) range += 1;
+                           if (this.hasTech('AnimalHusbandry')) range += 1;
+                           if (this.hasFusion('SwiftRiders')) range += 1;
+                        }
+                        if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > range) continue;
+                    }
+                    const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                    if (dist < bestDist) { bestDist = dist; bestTarget = h; }
+                }
+            }
+        }
+
+        if (bestTarget) {
+            att.entity.targetId = bestTarget.id;
+            hostileSlots.set(bestTarget.id, hostileSlots.get(bestTarget.id)! + att.size);
+        } else {
+            att.entity.targetId = null;
+        }
+    }
+  }
+
+  update(dt: number) {
+    if (this.state.phase !== 'PLAYING') return;
+
+    this.assignTargets();
+
+    this.state.time += dt;
+    const currentTurn = Math.floor(this.state.time / 10) + 1;
+
+    if (currentTurn > this.state.turn && this.state.turn < 40) {
+      this.state.turn = currentTurn;
+      this.onTurnChange(currentTurn);
+    }
+
+    const hostileEnemies = this.state.enemies.filter(e => !e.isConverted).length;
+    if (this.state.time >= 400 && hostileEnemies === 0) {
+      this.state.phase = 'VICTORY';
+      this.notify(true);
+      return;
+    }
+
+    if (this.state.time < 400) {
+      const turn = this.state.turn;
+      const wavePhase = this.state.time % 10;
+      
+      const comp = getWaveComposition(turn, this.threatLevel);
+
+      const baseInterval = Math.max(0.2, 1.5 - (turn * 0.02) - (this.threatLevel * 0.15));
+      const baseRate = 1 / baseInterval;
+      
+      const rateMultiplier = 7.5 * Math.pow(wavePhase, 1.5) * Math.exp(-wavePhase);
+      const modulatedRate = baseRate * rateMultiplier;
+
+      this.state.spawnRates = {
+        scout: comp.scout * baseRate,
+        warrior: comp.warrior * baseRate,
+        brute: comp.brute * baseRate,
+        reinforcement: 1 * baseRate // Reinforcements spawn at constant rate relative, modulated
+      };
+
+      this.state.currentSpawnRates = {
+        scout: comp.scout * modulatedRate,
+        warrior: comp.warrior * modulatedRate,
+        brute: comp.brute * modulatedRate,
+        reinforcement: modulatedRate
+      };
+
+      if (this.state.currentSpawnRates.scout > 0) {
+        this.scoutSpawnTimer -= this.state.currentSpawnRates.scout * dt;
+        while (this.scoutSpawnTimer <= 0) {
+          this.scoutSpawnTimer += 1.0;
+          this.spawnEnemy('Scout');
+        }
+      } else {
+        this.scoutSpawnTimer = 1.0;
+      }
+
+      if (this.state.currentSpawnRates.warrior > 0) {
+        this.warriorSpawnTimer -= this.state.currentSpawnRates.warrior * dt;
+        while (this.warriorSpawnTimer <= 0) {
+          this.warriorSpawnTimer += 1.0;
+          this.spawnEnemy('Warrior');
+        }
+      } else {
+        this.warriorSpawnTimer = 1.0;
+      }
+
+      if (this.state.currentSpawnRates.brute > 0) {
+        this.bruteSpawnTimer -= this.state.currentSpawnRates.brute * dt;
+        while (this.bruteSpawnTimer <= 0) {
+          this.bruteSpawnTimer += 1.0;
+          this.spawnEnemy('Brute');
+        }
+      } else {
+        this.bruteSpawnTimer = 1.0;
+      }
+
+      if (this.state.currentSpawnRates.reinforcement > 0) {
+        this.reinforcementTimer -= this.state.currentSpawnRates.reinforcement * dt;
+        while (this.reinforcementTimer <= 0) {
+          this.reinforcementTimer += 1.0;
+          this.spawnReinforcements();
+        }
+      } else {
+        this.reinforcementTimer = 1.0;
+      }
+    }
+    this.updateEnemies(dt);
+    this.updateCombat(dt);
+    this.updateParticles(dt);
+    this.checkLevelUp();
+
+    this.notify(this.state.phase !== 'PLAYING');
+  }
+
+  spawnSparks(x: number, y: number, color: string, count: number = 5) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 20 + Math.random() * 40;
+      this.state.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1.0,
+        color
+      });
+    }
+  }
+
+  updateParticles(dt: number) {
+    this.state.particles = this.state.particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 2;
+      return p.life > 0;
+    });
+  }
+
+  spawnReinforcements() {
+    if (this.safePoints.length === 0) return;
+
+    const turn = this.state.turn;
+    const type = 'Scout';
+    const spawnHex = this.safePoints[Math.floor(Math.random() * this.safePoints.length)];
+    const pos = hexToPixel(spawnHex, HEX_SIZE);
+
+    let hp = 20, speed = 1.6, damage = 2;
+    hp *= (1 + turn * 0.1);
+    damage *= (1 + turn * 0.05);
+
+    this.state.enemies.push({
+      id: Math.random().toString(),
+      hex: spawnHex,
+      x: pos.x,
+      y: pos.y,
+      hp, maxHp: hp, type, speed, damage, isConverted: true
+    });
+  }
+
+  spawnEnemy(type: 'Scout' | 'Warrior' | 'Brute') {
+    if (this.spawnPoints.length === 0) return;
+
+    const turn = this.state.turn;
+    const spawnHex = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
+    const pos = hexToPixel(spawnHex, HEX_SIZE);
+
+    let hp = 20, speed = 1.5, damage = 1;
+    if (type === 'Warrior') { hp = 50; speed = 1.0; damage = 2.5; }
+    if (type === 'Brute') { hp = 150; speed = 0.6; damage = 7.5; }
+
+    hp *= (1 + turn * 0.1);
+    damage *= (1 + turn * 0.05);
+
+    // Threat 3+ regions grant bonus HP and damage modifier: 1.333^(threat - 3)
+    if (this.threatLevel >= 3) {
+      const modifier = Math.pow(1.333, this.threatLevel - 3);
+      hp *= modifier;
+      damage *= modifier;
+    }
+
+    this.state.enemies.push({
+      id: Math.random().toString(),
+      hex: spawnHex,
+      x: pos.x,
+      y: pos.y,
+      hp, maxHp: hp, type, speed, damage, isConverted: false
+    });
+  }
+
+  updateFlowField() {
+    this.costs.clear();
+    const queue: { hex: Hex, cost: number }[] = [];
+
+    for (const city of this.state.cities) {
+      const key = hexToString(city.hex);
+      this.costs.set(key, 0);
+      queue.push({ hex: city.hex, cost: 0 });
+    }
+
+    while (queue.length > 0) {
+      queue.sort((a, b) => b.cost - a.cost);
+      const current = queue.pop()!;
+      const currentKey = hexToString(current.hex);
+
+      if (current.cost > this.costs.get(currentKey)!) continue;
+
+      for (let i = 0; i < 6; i++) {
+        const neighbor = hexNeighbor(current.hex, i);
+        const nKey = hexToString(neighbor);
+        const tile = this.state.tiles.get(nKey);
+
+        if (!tile) continue;
+
+        let enterCost = 1;
+        if (tile.terrain === Terrain.Forest || tile.terrain === Terrain.Hills) enterCost = 2;
+        else if (tile.terrain === Terrain.Mountains) enterCost = 5;
+
+        const newCost = current.cost + enterCost;
+        if (!this.costs.has(nKey) || newCost < this.costs.get(nKey)!) {
+          this.costs.set(nKey, newCost);
+          queue.push({ hex: neighbor, cost: newCost });
+        }
+      }
+    }
+  }
+
+  updateEnemies(dt: number) {
+    for (const enemy of this.state.enemies) {
+      const currentTile = this.state.tiles.get(hexToString(enemy.hex));
+      let terrainCost = 1;
+      if (currentTile) {
+        if (currentTile.terrain === Terrain.Forest || currentTile.terrain === Terrain.Hills) terrainCost = 2;
+        else if (currentTile.terrain === Terrain.Mountains) terrainCost = 5;
+      }
+      let actualSpeed = enemy.speed / terrainCost;
+
+      if (enemy.isConverted) {
+        const target = enemy.targetId ? this.state.enemies.find(e => e.id === enemy.targetId) : null;
+
+        if (target) {
+          const dx = target.x - enemy.x;
+          const dy = target.y - enemy.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) {
+            enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
+            enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
+            enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+          } else {
+            target.hp -= enemy.damage * dt; // Converted strikes Hostile
+            enemy.hp -= target.damage * 0.5 * dt; // Hostile passive feedback
+            if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
+            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+          }
+        } else {
+          // Fallback: move to most damaged outpost
+          let bestCity = null;
+          let minRatio = Infinity;
+          for (const c of this.state.cities) {
+            const ratio = c.hp / c.maxHp;
+            if (ratio < minRatio) { minRatio = ratio; bestCity = c; }
+          }
+          if (bestCity) {
+            const cp = hexToPixel(bestCity.hex, HEX_SIZE);
+            const dx = cp.x - enemy.x;
+            const dy = cp.y - enemy.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 15) {
+              enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
+              enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
+              enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+            }
+          }
+        }
+        continue;
+      }
+
+      const enemySize = this.getEnemySize(enemy.type);
+      let filledSlots = 0;
+      for (const u of this.state.friendlyUnits) {
+        if (u.targetId === enemy.id && Math.hypot(u.x - enemy.x, u.y - enemy.y) < 15) {
+          filledSlots += this.getFriendlySize(u);
+        }
+      }
+      for (const e of this.state.enemies) {
+        if (e.isConverted && e.targetId === enemy.id && Math.hypot(e.x - enemy.x, e.y - enemy.y) < 15) {
+          filledSlots += this.getEnemySize(e.type);
+        }
+      }
+
+      const speedMult = Math.max(0, 1 - (filledSlots / enemySize));
+      actualSpeed *= speedMult;
+
+      const currentCost = this.costs.get(hexToString(enemy.hex)) ?? 9999;
+      if (currentCost === 0) continue;
+
+      let bestNeighbor = enemy.hex;
+      let lowestCost = currentCost;
+
+      for (let i = 0; i < 6; i++) {
+        const neighbor = hexNeighbor(enemy.hex, i);
+        const cost = this.costs.get(hexToString(neighbor));
+        if (cost !== undefined && cost < lowestCost) {
+          lowestCost = cost;
+          bestNeighbor = neighbor;
+        }
+      }
+
+      const targetPos = hexToPixel(bestNeighbor, HEX_SIZE);
+      const dx = targetPos.x - enemy.x;
+      const dy = targetPos.y - enemy.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 0) {
+        const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
+        enemy.x += (dx / dist) * moveDist;
+        enemy.y += (dy / dist) * moveDist;
+        enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+      }
+    }
+  }
+
+  updateCitySizes() {
+    for (const city of this.state.cities) {
+      let adjCount = 0;
+      for (const other of this.state.cities) {
+        if (city.id !== other.id && hexDistance(city.hex, other.hex) === 1) {
+          adjCount++;
+        }
+      }
+      city.size = 1 + adjCount;
+    }
+  }
+
+  updateCombat(dt: number) {
+    this.updateCitySizes();
+    const dmgMult = (this.hasTech('BronzeWorking') ? 1.3 : 1.0) * 1.2;
+
+    for (const city of this.state.cities) {
+      if (this.hasTech('Irrigation')) {
+        const regen = this.hasFusion('Aqueducts') ? 15 : 5;
+        city.hp = Math.min(city.maxHp, city.hp + regen * dt);
+      }
+
+      city.timeSinceLastDamage += dt;
+      if (city.timeSinceLastDamage >= 3) {
+        city.hp = Math.min(city.maxHp, city.hp + 2 * dt);
+      }
+    }
+
+    // Ensure correct number of defenders and specialists per city
+    for (const city of this.state.cities) {
+      const tile = this.state.tiles.get(hexToString(city.hex));
+      const targetDefenders = Math.min(6, city.size);
+      let currentDefenders = 0;
+      let currentCavalry = 0;
+      let currentArchers = 0;
+      let currentMystics = 0;
+      
+      for (const unit of this.state.friendlyUnits) {
+        if (unit.cityId === city.id) {
+          if (unit.type === 'guard') currentDefenders++;
+          if (unit.type === 'cavalry') currentCavalry++;
+          if (unit.type === 'archer') currentArchers++;
+          if (unit.type === 'mystic') currentMystics++;
+        }
+      }
+      
+      if (currentDefenders < targetDefenders) {
+        const pos = hexToPixel(city.hex, HEX_SIZE);
+        this.state.friendlyUnits.push({
+          id: Math.random().toString(),
+          cityId: city.id,
+          type: 'guard',
+          x: pos.x,
+          y: pos.y,
+          targetId: null,
+          state: 'idle',
+          angle: Math.random() * Math.PI * 2,
+          hp: 50,
+          maxHp: 50
+        });
+      }
+
+      let targetCavalry = 0;
+      if (tile?.terrain === Terrain.Plains) {
+        if (this.hasTech('HorsebackRiding')) targetCavalry += 1;
+        if (this.hasTech('AnimalHusbandry')) targetCavalry += 1;
+        if (this.hasFusion('SwiftRiders')) targetCavalry += 1;
+      }
+      if (currentCavalry < targetCavalry) {
+        const pos = hexToPixel(city.hex, HEX_SIZE);
+        this.state.friendlyUnits.push({
+          id: Math.random().toString(),
+          cityId: city.id,
+          type: 'cavalry',
+          cavalryIndex: currentCavalry,
+          x: pos.x,
+          y: pos.y,
+          targetId: null,
+          state: 'idle',
+          angle: Math.random() * Math.PI * 2,
+          hp: 100,
+          maxHp: 100
+        });
+      }
+
+      let targetArchers = 0;
+      if (tile?.terrain === Terrain.Hills) {
+         if (this.hasTech('Archery')) targetArchers += 1;
+         if (this.hasTech('Crossbows')) targetArchers += 1;
+         if (this.hasFusion('MountainFortress')) targetArchers += 1;
+      }
+      if (currentArchers < targetArchers) {
+        const pos = hexToPixel(city.hex, HEX_SIZE);
+        this.state.friendlyUnits.push({
+          id: Math.random().toString(),
+          cityId: city.id,
+          type: 'archer',
+          archerIndex: currentArchers,
+          x: pos.x,
+          y: pos.y,
+          targetId: null,
+          state: 'idle',
+          angle: Math.random() * Math.PI * 2,
+          hp: 50,
+          maxHp: 50,
+          cooldown: 0
+        });
+      }
+
+      let targetMystics = 0;
+      if (tile?.terrain === Terrain.Forest) {
+         if (this.hasTech('Mysticism')) targetMystics = 1;
+      }
+      if (currentMystics < targetMystics) {
+        const pos = hexToPixel(city.hex, HEX_SIZE);
+        this.state.friendlyUnits.push({
+          id: Math.random().toString(),
+          cityId: city.id,
+          type: 'mystic',
+          mysticIndex: currentMystics,
+          x: pos.x,
+          y: pos.y,
+          targetId: null,
+          state: 'idle',
+          angle: Math.random() * Math.PI * 2,
+          hp: 50,
+          maxHp: 50,
+          cooldown: 0
+        });
+      }
+    }
+
+    // Update friendly units
+    this.state.friendlyUnits = this.state.friendlyUnits.filter(unit => {
+      const city = this.state.cities.find(c => c.id === unit.cityId);
+      if (!city) return false;
+
+      const cityPos = hexToPixel(city.hex, HEX_SIZE);
+      const tile = this.state.tiles.get(hexToString(city.hex));
+
+      if (unit.type === 'archer') {
+        unit.cooldown = (unit.cooldown || 0) - dt;
+        if (unit.cooldown <= 0) {
+          unit.cooldown = this.hasTech('Archery') ? 1.5 : 2.5;
+          let range = 1;
+          if (this.hasTech('Crossbows')) range += 1;
+          if (this.hasFusion('MountainFortress')) range += 1;
+          const archDmg = 50;
+
+          let farthest: import('./Types').Enemy | null = null;
+          let maxDist = -1;
+          for (const enemy of this.state.enemies) {
+            if (enemy.isConverted) continue;
+            const dist = hexDistance(city.hex, enemy.hex);
+            if (dist <= range && dist > maxDist) {
+              maxDist = dist;
+              farthest = enemy;
+            }
+          }
+          if (farthest) {
+            this.state.projectiles.push({
+              id: Math.random().toString(),
+              x: unit.x,
+              y: unit.y,
+              targetId: farthest.id,
+              damage: archDmg,
+              speed: 250
+            });
+          }
+        }
+        
+        let orbitOffset = (unit.archerIndex || 0) * (Math.PI * 2 / 3);
+        unit.angle += dt * 0.5;
+        const targetX = cityPos.x + Math.cos(unit.angle + orbitOffset) * 8;
+        const targetY = cityPos.y + Math.sin(unit.angle + orbitOffset) * 8;
+        unit.x += (targetX - unit.x) * 5 * dt;
+        unit.y += (targetY - unit.y) * 5 * dt;
+
+        return true;
+      }
+
+      if (unit.type === 'mystic') {
+        unit.cooldown = (unit.cooldown || 0) - dt;
+        if (unit.cooldown <= 0) {
+          unit.cooldown = this.hasTech('Mysticism') ? 3 : 5;
+          let range = 1;
+          if (this.hasTech('Animism')) range += 1;
+          if (this.hasFusion('Theology')) range += 1;
+          
+          const convertChance = this.hasFusion('Theology') ? (this.hasTech('Animism') ? 0.2 : 0.1) : 0;
+          let convertedOne = false;
+          
+          for (const enemy of this.state.enemies) {
+            if (enemy.isConverted) continue;
+            if (hexDistance(city.hex, enemy.hex) <= range) {
+              enemy.hp -= this.hasTech('Mysticism') ? 100 : 50;
+              this.spawnSparks(enemy.x, enemy.y, enemy.type === 'Brute' ? '#8b0000' : '#ff0000', 8);
+              this.spawnSparks(enemy.x, enemy.y, '#a855f7', 5);
+              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && enemy.hp > 0) {
+                enemy.isConverted = true;
+                convertedOne = true;
+              }
+            }
+          }
+        }
+
+        unit.angle += dt * 2;
+        const targetX = cityPos.x;
+        const targetY = cityPos.y - 12 + Math.sin(unit.angle) * 4;
+        unit.x += (targetX - unit.x) * 5 * dt;
+        unit.y += (targetY - unit.y) * 5 * dt;
+
+        return true;
+      }
+
+      const isCavalry = unit.type === 'cavalry';
+      const hillBonus = (this.hasTech('Mining') && tile?.terrain === Terrain.Hills) ? 1.5 : 1.0;
+      const damage = (isCavalry ? (this.hasFusion('WarChariots') ? 30 : 10) : 15) * dmgMult * hillBonus;
+      const speed = (isCavalry ? (this.hasFusion('WarChariots') ? 3.0 : 2.0) : 1.0) * HEX_SIZE;
+
+      const unitTile = this.state.tiles.get(hexToString(pixelToHex(unit.x, unit.y, HEX_SIZE)));
+      let unitTerrainCost = 1;
+      if (unitTile) {
+        if (unitTile.terrain === Terrain.Forest || unitTile.terrain === Terrain.Hills) unitTerrainCost = 2;
+        else if (unitTile.terrain === Terrain.Mountains) unitTerrainCost = 5;
+      }
+      const actualSpeed = speed / unitTerrainCost;
+
+      if (unit.targetId) {
+        const target = this.state.enemies.find(e => e.id === unit.targetId);
+        if (target) {
+          const dx = target.x - unit.x;
+          const dy = target.y - unit.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) {
+            unit.x += (dx / dist) * actualSpeed * dt;
+            unit.y += (dy / dist) * actualSpeed * dt;
+          } else {
+            // Physical reach - deal damage
+            target.hp -= damage * dt;
+            if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
+            // Target deals damage back to guard (feedback)
+            unit.hp -= target.damage * 0.5 * dt;
+            if (Math.random() < dt * 10) this.spawnSparks(unit.x, unit.y, isCavalry ? '#22c55e' : '#4287f5', 1);
+            if (unit.hp <= 0) return false;
+          }
+        }
+        unit.state = 'engaging';
+      } else {
+        const dx = cityPos.x - unit.x;
+        const dy = cityPos.y - unit.y;
+        const dist = Math.hypot(dx, dy);
+        
+        if (dist > 15) {
+          unit.state = 'returning';
+          unit.x += (dx / dist) * actualSpeed * dt;
+          unit.y += (dy / dist) * actualSpeed * dt;
+        } else {
+          if (unit.hp < unit.maxHp && isCavalry) {
+            unit.state = 'healing';
+          } else {
+            unit.state = 'idle';
+          }
+
+          unit.hp = Math.min(unit.maxHp, unit.hp + (unit.state === 'healing' ? 10 : 5) * dt);
+          
+          if (isCavalry) {
+            unit.angle += dt * (this.hasFusion('WarChariots') ? 1.5 : 1.0);
+            
+            let orbitDist = 0;
+            if (this.hasTech('HorsebackRiding')) orbitDist += 1;
+            if (this.hasTech('AnimalHusbandry')) orbitDist += 1;
+            if (this.hasFusion('SwiftRiders')) orbitDist += 1;
+
+            const orbitRadius = (orbitDist * Math.sqrt(3)/2 + 0.5) * HEX_SIZE; 
+            const targetX = cityPos.x + Math.cos(unit.angle) * orbitRadius;
+            const targetY = cityPos.y + Math.sin(unit.angle) * orbitRadius;
+            
+            const mdx = targetX - unit.x;
+            const mdy = targetY - unit.y;
+            const mdist = Math.hypot(mdx, mdy);
+            if (mdist > 0) {
+              const moveDist = Math.min(mdist, actualSpeed * dt);
+              unit.x += (mdx / mdist) * moveDist;
+              unit.y += (mdy / mdist) * moveDist;
+            }
+          } else {
+            unit.angle += dt * 2;
+            const targetX = cityPos.x + Math.cos(unit.angle) * 12;
+            const targetY = cityPos.y + Math.sin(unit.angle) * 12;
+            unit.x += (targetX - unit.x) * 5 * dt;
+            unit.y += (targetY - unit.y) * 5 * dt;
+          }
+        }
+      }
+      return true;
+    });
+
+    // Update projectiles
+    this.state.projectiles = this.state.projectiles.filter(p => {
+      const target = this.state.enemies.find(e => e.id === p.targetId);
+      if (!target) return false;
+      const dx = target.x - p.x;
+      const dy = target.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 5) {
+        target.hp -= p.damage;
+        this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 5);
+        return false;
+      }
+      p.x += (dx / dist) * p.speed * dt;
+      p.y += (dy / dist) * p.speed * dt;
+      return true;
+    });
+
+    const cityPatrolDamage = new Map<string, number>();
+    for (const city of this.state.cities) { cityPatrolDamage.set(city.id, 0); }
+    for (const unit of this.state.friendlyUnits) {
+      if (unit.state === 'idle' || unit.state === 'healing') {
+        const city = this.state.cities.find(c => c.id === unit.cityId);
+        if (!city) continue;
+        const tile = this.state.tiles.get(hexToString(city.hex));
+        const isCavalry = unit.type === 'cavalry';
+        const hillBonus = (this.hasTech('Mining') && tile?.terrain === Terrain.Hills) ? 1.5 : 1.0;
+        const damage = (isCavalry ? (this.hasFusion('WarChariots') ? 30 : 10) : 15) * dmgMult * hillBonus;
+        cityPatrolDamage.set(unit.cityId, (cityPatrolDamage.get(unit.cityId) || 0) + damage);
+      }
+    }
+
+    for (const enemy of this.state.enemies) {
+      if (enemy.isConverted) continue;
+      const cost = this.costs.get(hexToString(enemy.hex));
+      if (cost === 0) {
+        const city = this.state.cities.find(c => hexToString(c.hex) === hexToString(enemy.hex));
+        if (city) {
+          const armor = this.hasTech('Masonry') ? (this.hasFusion('Aqueducts') ? 3 : 1) : 0;
+          const dmg = Math.max(1, enemy.damage - armor) * dt;
+          city.hp -= dmg;
+          city.timeSinceLastDamage = 0;
+          
+          const patrolDmg = cityPatrolDamage.get(city.id) || 0;
+          if (patrolDmg > 0) {
+            enemy.hp -= patrolDmg * 0.5 * dt; // Patrol feedback damage
+            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+          }
+
+          const pos = hexToPixel(city.hex, HEX_SIZE);
+          if (Math.random() < dt * 10) this.spawnSparks(pos.x, pos.y, '#ffffff', 1);
+        }
+      }
+    }
+
+    const xpMult = this.hasTech('Writing') ? 1.25 : 1.0;
+    this.state.enemies = this.state.enemies.filter(e => {
+      if (e.hp <= 0) {
+        const xpGain = (e.maxHp * 0.1) * xpMult;
+        this.state.xp += xpGain;
+        this.state.stats.cumulativeXp += xpGain;
+        this.state.stats.threatsKilled++;
+        return false;
+      }
+      return true;
+    });
+
+    const initialCities = this.state.cities.length;
+    this.state.cities = this.state.cities.filter(c => c.hp > 0);
+    if (this.state.cities.length < initialCities) {
+      this.state.stats.citiesLost += (initialCities - this.state.cities.length);
+      for (const tile of this.state.tiles.values()) {
+        if (tile.improvementLevel === 2) {
+          const hasCity = this.state.cities.some(c => hexToString(c.hex) === hexToString(tile.hex));
+          if (!hasCity) {
+            tile.improvementLevel = 0;
+          }
+        }
+      }
+      this.updateFlowField();
+    }
+
+    if (this.state.cities.length === 0 && this.state.phase === 'PLAYING') {
+      this.state.phase = 'GAME_OVER';
+    }
+  }
+
+  checkLevelUp() {
+    if (this.state.xp >= this.state.xpToNext) {
+      this.state.xp -= this.state.xpToNext;
+      this.state.level++;
+      this.state.xpToNext = Math.floor(this.state.xpToNext * 1.5);
+
+      const available = ALL_TECHS.filter(t => {
+        if (this.state.techs.includes(t.id)) return false;
+        if (t.id === 'AnimalHusbandry' && !this.state.techs.includes('HorsebackRiding')) return false;
+        if (t.id === 'Crossbows' && !this.state.techs.includes('Archery')) return false;
+        if (t.id === 'Animism' && !this.state.techs.includes('Mysticism')) return false;
+        return true;
+      });
+      const shuffled = [...available].sort(() => 0.5 - Math.random());
+      const picks = shuffled.slice(0, 3);
+      if (picks.length > 0) {
+        this.state.pendingTechPicks.push(picks);
+        if (this.state.phase === 'PLAYING') {
+          this.state.phase = 'LEVEL_UP';
+        }
+      }
+    }
+  }
+
+  pickTech(techId: string) {
+    this.state.techs.push(techId);
+    this.state.pendingTechPicks.shift();
+
+    if (techId === 'Masonry') {
+      for (const city of this.state.cities) {
+        city.maxHp += 50;
+        city.hp += 50;
+      }
+    }
+
+    for (const fusion of FUSIONS) {
+      if (!this.state.fusions.includes(fusion.id)) {
+        if (fusion.req.every(req => this.state.techs.includes(req))) {
+          this.state.fusions.push(fusion.id);
+        }
+      }
+    }
+
+    if (this.state.pendingTechPicks.length === 0) {
+      this.state.phase = 'PLAYING';
+    }
+    this.notify(true);
+  }
+
+  onTurnChange(turn: number) {
+    for (const city of this.state.cities) {
+      city.size++;
+    }
+
+    if (this.state.focusedHex) {
+      const tile = this.state.tiles.get(this.state.focusedHex);
+      if (tile) {
+        tile.improvementLevel = (tile.improvementLevel || 0) + 1;
+        if (tile.improvementLevel === 2) {
+          this.createCity(tile.hex);
+          this.state.focusedHex = null;
+        }
+        this.updateFlowField();
+      }
+    }
+  }
+
+  lastNotifyTime = 0;
+
+  notify(force: boolean = false) {
+    if (this.onStateChange) {
+      const now = performance.now();
+      if (force || now - this.lastNotifyTime > 66) { // ~15 FPS
+        this.onStateChange({ ...this.state });
+        this.lastNotifyTime = now;
+      }
+    }
+  }
+
+  instaWin() {
+    this.state.phase = 'VICTORY';
+    this.state.enemies = [];
+    this.notify(true);
+  }
+
+  instaLose() {
+    this.state.phase = 'GAME_OVER';
+    this.notify(true);
+  }
+}
