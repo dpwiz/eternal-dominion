@@ -1,4 +1,4 @@
-import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound } from './HexMath';
+import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound, stringToHex } from './HexMath';
 import { GameState, Terrain, Enemy, Tech } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
 
@@ -90,6 +90,7 @@ export class GameEngine {
       friendlyUnits: [],
       projectiles: [],
       particles: [],
+      engineers: [],
       techs: [],
       fusions: [],
       turn: 1,
@@ -171,6 +172,7 @@ export class GameEngine {
       this.notify(true);
       return true;
     } else if (this.state.phase === 'PLAYING') {
+      if (this.state.turn >= 40) return false;
       if (tile.improvementLevel === 2) return false;
       
       let hasAdj = false;
@@ -229,9 +231,10 @@ export class GameEngine {
       return 4;
     }
     if (unit.type === 'mystic') {
-      if (this.hasFusion('Theology')) return 4;
-      if (this.hasTech('Animism')) return 2;
-      return 1;
+      let size = 1;
+      if (this.hasTech('Animism')) size += 1;
+      if (this.hasFusion('Theology')) size += 1;
+      return size;
     }
     if (unit.type === 'archer') return 1;
     return 1;
@@ -407,11 +410,160 @@ export class GameEngine {
       }
     }
     this.updateEnemies(dt);
+    this.updateEngineer(dt);
     this.updateCombat(dt);
     this.updateParticles(dt);
     this.checkLevelUp();
 
     this.notify(this.state.phase !== 'PLAYING');
+  }
+
+  updateEngineer(dt: number) {
+    if (this.state.focusedHex && this.state.phase === 'PLAYING') {
+      const targetHex = stringToHex(this.state.focusedHex);
+      
+      const adjCandidates = [];
+      for (let i = 0; i < 6; i++) {
+        const nHex = hexNeighbor(targetHex, i);
+        const nTile = this.state.tiles.get(hexToString(nHex));
+        if (nTile && (nTile.improvementLevel || 0) >= 2) {
+          adjCandidates.push(nHex);
+        }
+      }
+
+      if (adjCandidates.length === 0) {
+        let minDist = Infinity;
+        let closestCity = null;
+        for (const city of this.state.cities) {
+          const dist = hexDistance(city.hex, targetHex);
+          if (dist < minDist) {
+            minDist = dist;
+            closestCity = city;
+          }
+        }
+        if (closestCity) {
+          adjCandidates.push(closestCity.hex);
+        }
+      }
+
+      while (this.state.engineers.length < 4 && adjCandidates.length > 0) {
+        // Pick a random adjacent candidate to spawn from
+        const candHex = adjCandidates[Math.floor(Math.random() * adjCandidates.length)];
+        const pos = hexToPixel(candHex, HEX_SIZE);
+        this.state.engineers.push({
+          id: Math.random().toString(),
+          x: pos.x,
+          y: pos.y,
+          targetHex: this.state.focusedHex,
+          homeCityHex: candHex,
+          state: 'MOVING_TO_WORK',
+          workTimer: Math.random(), // Stagger work timers
+          offsetX: 0,
+          offsetY: 0
+        });
+      }
+      
+      for (const eng of this.state.engineers) {
+         if (eng.targetHex !== this.state.focusedHex) {
+           eng.targetHex = this.state.focusedHex;
+           eng.state = 'MOVING_TO_WORK';
+         }
+      }
+    } else {
+      for (const eng of this.state.engineers) {
+        if (eng.state !== 'RETURNING') {
+          eng.state = 'RETURNING';
+        }
+      }
+    }
+
+    const speed = 40;
+    this.state.engineers = this.state.engineers.filter(eng => {
+      if (eng.state === 'MOVING_TO_WORK' && eng.targetHex) {
+        const targetPos = hexToPixel(stringToHex(eng.targetHex), HEX_SIZE);
+        const dx = targetPos.x - eng.x;
+        const dy = targetPos.y - eng.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 2) {
+          eng.x += (dx / dist) * speed * dt;
+          eng.y += (dy / dist) * speed * dt;
+        } else {
+          eng.state = 'WORKING';
+          eng.offsetX = (Math.random() - 0.5) * HEX_SIZE;
+          eng.offsetY = (Math.random() - 0.5) * HEX_SIZE;
+        }
+      } else if (eng.state === 'WORKING' && eng.targetHex) {
+        const basePos = hexToPixel(stringToHex(eng.targetHex), HEX_SIZE);
+        const targetX = basePos.x + eng.offsetX;
+        const targetY = basePos.y + eng.offsetY;
+        
+        const dx = targetX - eng.x;
+        const dy = targetY - eng.y;
+        const dist = Math.hypot(dx, dy);
+        
+        if (dist > 1) {
+           eng.x += (dx / dist) * Math.min(dist, speed * dt);
+           eng.y += (dy / dist) * Math.min(dist, speed * dt);
+        }
+        
+        eng.workTimer += dt;
+        if (eng.workTimer >= 1.0) {
+           eng.workTimer -= 1.0;
+           eng.offsetX = (Math.random() - 0.5) * HEX_SIZE;
+           eng.offsetY = (Math.random() - 0.5) * HEX_SIZE;
+           const xpMult = this.hasTech('Writing') ? 1.25 : 1.0;
+           const xpGain = 1 * xpMult;
+           this.state.xp += xpGain;
+           this.state.stats.cumulativeXp += xpGain;
+           this.spawnSparks(eng.x, eng.y, '#aaaaaa', 2);
+        }
+      } else if (eng.state === 'RETURNING') {
+        let closestPos = null;
+        let minDist = Infinity;
+        
+        if (eng.targetHex) {
+          const tHex = stringToHex(eng.targetHex);
+          for (let i = 0; i < 6; i++) {
+            const nHex = hexNeighbor(tHex, i);
+            const nTile = this.state.tiles.get(hexToString(nHex));
+            if (nTile && (nTile.improvementLevel || 0) >= 2) {
+              const pos = hexToPixel(nHex, HEX_SIZE);
+              const dist = Math.hypot(pos.x - eng.x, pos.y - eng.y);
+              if (dist < minDist) {
+                minDist = dist;
+                closestPos = pos;
+              }
+            }
+          }
+        }
+        
+        // Fallback if no adjacent safe hexes found
+        if (!closestPos) {
+           for (const city of this.state.cities) {
+             const pos = hexToPixel(city.hex, HEX_SIZE);
+             const dist = Math.hypot(pos.x - eng.x, pos.y - eng.y);
+             if (dist < minDist) {
+               minDist = dist;
+               closestPos = pos;
+             }
+           }
+        }
+
+        if (closestPos) {
+          const dx = closestPos.x - eng.x;
+          const dy = closestPos.y - eng.y;
+          if (minDist > 2) {
+            eng.x += (dx / minDist) * speed * dt;
+            eng.y += (dy / minDist) * speed * dt;
+          } else {
+            return false; // Remove engineer
+          }
+        } else {
+            return false; // Remove engineer
+        }
+      }
+      return true; // Keep engineer
+    });
   }
 
   spawnSparks(x: number, y: number, color: string, count: number = 5) {
@@ -1094,6 +1246,10 @@ export class GameEngine {
   }
 
   onTurnChange(turn: number) {
+    if (turn >= 40) {
+       this.state.focusedHex = null; // drop focus frame so engineer goes home
+    }
+
     for (const city of this.state.cities) {
       city.size++;
     }

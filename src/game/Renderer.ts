@@ -137,9 +137,9 @@ export class Renderer {
          else unitSize = 4;
       }
       else if (unit.type === 'mystic') {
-         if (state.fusions.includes('Theology')) unitSize = 4;
-         else if (state.techs.includes('Animism')) unitSize = 2;
-         else unitSize = 1;
+         unitSize = 1;
+         if (state.techs.includes('Animism')) unitSize += 1;
+         if (state.fusions.includes('Theology')) unitSize += 1;
       }
       const radius = unitSize <= 1 ? 4 : (unitSize === 2 ? 6 : 8);
       
@@ -211,6 +211,16 @@ export class Renderer {
         this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
         this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
       }
+    }
+
+    for (const eng of state.engineers) {
+      this.ctx.beginPath();
+      this.ctx.arc(eng.x, eng.y, 4, 0, Math.PI * 2);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#000000';
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
     }
 
     this.ctx.restore();

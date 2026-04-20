@@ -58,6 +58,18 @@ export interface Particle {
   color: string;
 }
 
+export interface Engineer {
+  id: string;
+  x: number;
+  y: number;
+  targetHex: string | null;
+  homeCityHex: Hex | null;
+  state: 'MOVING_TO_WORK' | 'WORKING' | 'RETURNING';
+  workTimer: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface FriendlyUnit {
   id: string;
   cityId: string;
@@ -82,6 +94,7 @@ export interface GameState {
   friendlyUnits: FriendlyUnit[];
   projectiles: Projectile[];
   particles: Particle[];
+  engineers: Engineer[];
   techs: string[];
   fusions: string[];
   turn: number;
