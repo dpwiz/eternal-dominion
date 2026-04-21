@@ -74,10 +74,12 @@ export class GameEngine {
   reinforcementTimer = 0;
   threatLevel: number;
   safeEdges: boolean[];
+  seed: number;
 
-  constructor(threatLevel: number = 0, safeEdges: boolean[] = [false, false, false, false, false, false]) {
+  constructor(threatLevel: number = 0, safeEdges: boolean[] = [false, false, false, false, false, false], seed: number = 12345) {
     this.threatLevel = threatLevel;
     this.safeEdges = safeEdges;
+    this.seed = seed;
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -108,6 +110,15 @@ export class GameEngine {
     };
   }
 
+  // Mulberry32 PRNG
+  nextRandom() {
+    this.seed |= 0;
+    this.seed = this.seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(this.seed ^ this.seed >>> 15, 1 | this.seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+
   generateMap() {
     this.spawnPoints = [];
     this.safePoints = [];
@@ -126,7 +137,7 @@ export class GameEngine {
         
         let terrain = Terrain.Plains;
         if (isPlayArea) {
-          const rand = Math.random();
+          const rand = this.nextRandom();
           if (rand < 0.05) terrain = Terrain.Mountains;
           else if (rand < 0.20) terrain = Terrain.Hills;
           else if (rand < 0.40) terrain = Terrain.Forest;

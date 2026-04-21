@@ -147,9 +147,10 @@ export default function App() {
        }
     }
     
-    // Seed is ignored right now since generateMap doesn't use it, 
-    // but preserving constructor signature if needed or creating new
-    const engine = new GameEngine(threatLevel, safeEdges);
+    // Provide a deterministic seed based on coordinate hash plus threat level
+    // q and r will uniquely identify the map tile since the campaign map places it deterministically
+    const seed = hex.q * 8731 + hex.r * 19283 + hex.s * 7823 + threatLevel * 991;
+    const engine = new GameEngine(threatLevel, safeEdges, seed);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
     setGameState(engine.state);
