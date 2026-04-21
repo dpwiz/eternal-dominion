@@ -261,6 +261,7 @@ export class GameEngine {
     if (!tile || tile.terrain === Terrain.Mountains) return false;
 
     if (this.state.phase === 'START') {
+      if (tile.improvementLevel === 2) return false;
       this.state.supplies -= 1;
       this.createCity(hex);
       this.state.phase = 'PLAYING';

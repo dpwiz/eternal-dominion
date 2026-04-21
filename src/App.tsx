@@ -301,7 +301,7 @@ export default function App() {
       const hex = pixelToHex(worldX, worldY, campaignRendererRef.current.HEX_SIZE);
       const clickedTile = campaignEngineRef.current.tiles.get(hexToString(hex));
       
-      if (clickedTile && clickedTile.status === 'CLAIMABLE') {
+      if (clickedTile && (clickedTile.status === 'CLAIMABLE' || clickedTile.status === 'CLEARED')) {
         startSurvival(clickedTile.hex);
       }
     } else {

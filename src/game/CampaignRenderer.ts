@@ -53,20 +53,14 @@ export class CampaignRenderer {
       this.drawHex(pos.x, pos.y, this.HEX_SIZE - 2, color, transparentBorder);
 
       // Render borders / UI
-      if (tile.status === 'CLAIMABLE') {
+      if (tile.status === 'CLAIMABLE' || tile.status === 'CLEARED') {
         if (hoverHex === hexToString(tile.hex)) {
           this.ctx.beginPath();
           this.drawHexPath(pos.x, pos.y, this.HEX_SIZE - 2);
           this.ctx.lineWidth = 4;
-          this.ctx.strokeStyle = 'white';
+          this.ctx.strokeStyle = tile.status === 'CLEARED' ? 'rgba(255, 255, 255, 0.6)' : 'white';
           this.ctx.stroke();
         }
-      } else if (tile.status === 'CLEARED' && hoverHex === hexToString(tile.hex)) {
-          this.ctx.beginPath();
-          this.drawHexPath(pos.x, pos.y, this.HEX_SIZE - 2);
-          this.ctx.lineWidth = 4;
-          this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-          this.ctx.stroke();
       }
 
       if (tile.status === 'CLEARED') {

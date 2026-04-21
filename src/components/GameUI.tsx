@@ -187,7 +187,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
       {/* Prompts */}
       {state.phase === 'START' && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-pulse pointer-events-auto">
-          Click anywhere on the map to place your Capital Outpost
+          Click anywhere on the map to place your new Outpost
         </div>
       )}
 
