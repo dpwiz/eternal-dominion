@@ -2,11 +2,118 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine, HEX_SIZE, getWaveComposition } from './game/Engine';
 import { Renderer } from './game/Renderer';
 import { GameUI } from './components/GameUI';
-import { pixelToHex, hexToString, Hex, hexNeighbor } from './game/HexMath';
-import { GameState } from './game/Types';
+import { pixelToHex, hexToString, Hex, hexNeighbor, hexDirections } from './game/HexMath';
+import { GameState, Terrain } from './game/Types';
 import { CampaignEngine } from './game/Campaign';
 import { CampaignRenderer } from './game/CampaignRenderer';
 import { ALL_TECHS, FUSIONS } from './game/Content';
+
+const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngine, renderer: Renderer, mousePosRef: React.MutableRefObject<{x: number, y: number}> }) => {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    let handle: number;
+    const loop = () => {
+       const mx = mousePosRef.current.x;
+       const my = mousePosRef.current.y;
+       const worldX = mx - renderer.camera.x;
+       const worldY = my - renderer.camera.y;
+       const hex = pixelToHex(worldX, worldY, HEX_SIZE);
+       
+       const tileStr = hexToString(hex);
+       const tile = engine.state.tiles.get(tileStr);
+
+       if (tile) {
+         const weightsMap = engine.getTerrainBlend(hex.q, hex.r, hex.s, hexDirections);
+         const weights: {name: string, w: number}[] = [];
+         let pM = 0, pH = 0, pF = 0, pP = 0;
+         for (const [t, w] of weightsMap.entries()) {
+            weights.push({ name: Terrain[t], w });
+            const base = engine.getTerrainBaseProbabilities(t);
+            pM += w * base.m;
+            pH += w * base.h;
+            pF += w * base.f;
+            pP += w * base.p;
+         }
+         
+         const centerT = Terrain[engine.centerTerrain];
+         const borderT = engine.borderTerrain.map(t => t == null ? '--' : Terrain[t]);
+
+         setData({
+           q: hex.q, r: hex.r, s: hex.s,
+           terrainStr: Terrain[tile.terrain],
+           centerT,
+           borderT,
+           weights,
+           probs: { m: pM, h: pH, f: pF, p: pP }
+         });
+       } else {
+         setData(null);
+       }
+
+       handle = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(handle);
+  }, [engine, renderer, mousePosRef]);
+
+  if (!data) return null;
+
+  return (
+    <div className="absolute bottom-4 right-4 bg-slate-900/95 text-white p-4 rounded-xl border border-slate-700 shadow-2xl pointer-events-none text-xs font-mono w-64 z-50">
+      <div className="font-bold text-green-400 mb-2 pb-1 border-b border-slate-700">TERRAIN BLEND DEBUG</div>
+      <div className="mb-2">
+        HEX: {data.q}, {data.r}, {data.s} <br/>
+        RESULT: <span className="text-amber-300 font-bold">{data.terrainStr}</span>
+      </div>
+      
+      <div className="mb-2 text-slate-400">
+        <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">MACRO MAP</div>
+        {(() => {
+          const tc = (t: string) => {
+            if (t === 'Plains') return '#a3d977';
+            if (t === 'Hills') return '#d9b377';
+            if (t === 'Forest') return '#4d8c39';
+            if (t === 'Mountains') return '#7a7a7a';
+            return '#ffffff';
+          };
+          const ts = (t: string) => <span style={{color: tc(t)}}>{t === '--' ? '--' : t.substring(0,2)}</span>;
+          return (
+            <div className="flex flex-col items-center gap-1 my-2 font-bold text-sm">
+              <div className="flex gap-3">
+                {ts(data.borderT[2])} {ts(data.borderT[1])}
+              </div>
+              <div className="flex gap-3">
+                {ts(data.borderT[3])} {ts(data.centerT)} {ts(data.borderT[0])}
+              </div>
+              <div className="flex gap-3">
+                {ts(data.borderT[4])} {ts(data.borderT[5])}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+      
+      <div className="mb-2 text-slate-400">
+        <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">BARYCENTRIC WEIGHTS</div>
+        {data.weights.map((w: any, idx: number) => (
+          <div key={idx} className="flex justify-between">
+            <span>{w.name}</span>
+            <span>{(w.w * 100).toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="text-slate-400">
+        <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">FINAL PROBABILITIES</div>
+        <div className="flex justify-between"><span className="text-slate-400">Plains</span><span>{(data.probs.p * 100).toFixed(1)}%</span></div>
+        <div className="flex justify-between"><span className="text-green-400">Forest</span><span>{(data.probs.f * 100).toFixed(1)}%</span></div>
+        <div className="flex justify-between"><span className="text-amber-600">Hills</span><span>{(data.probs.h * 100).toFixed(1)}%</span></div>
+        <div className="flex justify-between"><span className="text-slate-300">Mtns</span><span>{(data.probs.m * 100).toFixed(1)}%</span></div>
+      </div>
+    </div>
+  );
+};
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -137,12 +244,19 @@ export default function App() {
     
     // Check neighbors to build safe edges
     const safeEdges = [false, false, false, false, false, false];
+    const borderTerrain: (Terrain | null)[] = [null, null, null, null, null, null];
+    let centerTerrain = Terrain.Plains;
+    
     if (campaignEngineRef.current) {
+       centerTerrain = tile?.terrain ?? Terrain.Plains;
        for (let i = 0; i < 6; i++) {
           const nHex = hexNeighbor(hex, i);
           const nTile = campaignEngineRef.current.tiles.get(hexToString(nHex));
-          if (nTile && nTile.status === 'CLEARED') {
-             safeEdges[i] = true;
+          if (nTile) {
+            borderTerrain[i] = nTile.terrain;
+            if (nTile.status === 'CLEARED') {
+               safeEdges[i] = true;
+            }
           }
        }
     }
@@ -150,7 +264,7 @@ export default function App() {
     // Provide a deterministic seed based on coordinate hash plus threat level
     // q and r will uniquely identify the map tile since the campaign map places it deterministically
     const seed = hex.q * 8731 + hex.r * 19283 + hex.s * 7823 + threatLevel * 991;
-    const engine = new GameEngine(threatLevel, safeEdges, seed);
+    const engine = new GameEngine(threatLevel, safeEdges, seed, centerTerrain, borderTerrain);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
     setGameState(engine.state);
@@ -351,12 +465,16 @@ export default function App() {
                 localStorage.removeItem('campaign_save');
                 window.location.reload();
               }}
-              className="bg-red-900/80 hover:bg-red-800 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-red-700"
+              className="bg-red-900/80 hover:bg-red-800 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-red-700 pointer-events-auto"
             >
               Reset Campaign Progress
             </button>
           </div>
         </>
+      )}
+
+      {view === 'SURVIVAL' && showDebug && engineRef.current && rendererRef.current && (
+         <TerrainDebugPanel engine={engineRef.current} renderer={rendererRef.current} mousePosRef={mousePosRef} />
       )}
     </div>
   );

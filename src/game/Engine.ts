@@ -75,11 +75,21 @@ export class GameEngine {
   threatLevel: number;
   safeEdges: boolean[];
   seed: number;
+  centerTerrain: Terrain;
+  borderTerrain: (Terrain | null)[];
 
-  constructor(threatLevel: number = 0, safeEdges: boolean[] = [false, false, false, false, false, false], seed: number = 12345) {
+  constructor(
+    threatLevel: number = 0, 
+    safeEdges: boolean[] = [false, false, false, false, false, false], 
+    seed: number = 12345,
+    centerTerrain: Terrain = Terrain.Plains,
+    borderTerrain: (Terrain | null)[] = [null, null, null, null, null, null]
+  ) {
     this.threatLevel = threatLevel;
     this.safeEdges = safeEdges;
     this.seed = seed;
+    this.centerTerrain = centerTerrain;
+    this.borderTerrain = borderTerrain;
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -119,6 +129,53 @@ export class GameEngine {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
 
+  getTerrainBaseProbabilities(t: Terrain) {
+    switch (t) {
+      case Terrain.Forest:
+        return { m: 0.05, h: 0.15, f: 0.60, p: 0.20 };
+      case Terrain.Hills:
+        return { m: 0.20, h: 0.60, f: 0.05, p: 0.15 };
+      case Terrain.Mountains:
+        return { m: 0.60, h: 0.20, f: 0.05, p: 0.15 };
+      case Terrain.Plains:
+      default:
+        // Originally: mountains 0.05, hills 0.15, forest 0.20, plains 0.60
+        return { m: 0.025, h: 0.075, f: 0.10, p: 0.80 };
+    }
+  }
+
+  getTerrainBlend(q: number, r: number, s: number, directions: any[]) {
+    if (q === 0 && r === 0 && s === 0) return new Map([[this.centerTerrain, 1.0]]);
+    
+    let bestI = 0, bestU = 0, bestV = 0;
+    for (let i = 0; i < 6; i++) {
+       const dA = directions[i];
+       const dB = directions[(i+1)%6];
+       const u = dB.q * r - dB.r * q;
+       const v = dA.r * q - dA.q * r;
+       if (u >= 0 && v >= 0) {
+         if (u === 0 && v === 0) continue;
+         bestI = i;
+         bestU = u;
+         bestV = v;
+         break;
+       }
+    }
+    
+    const alpha = bestU / MAP_RADIUS;
+    const beta = bestV / MAP_RADIUS;
+    const gamma = Math.max(0, 1 - (alpha + beta)); 
+
+    const tA = this.borderTerrain[bestI] ?? this.centerTerrain;
+    const tB = this.borderTerrain[(bestI+1)%6] ?? this.centerTerrain;
+    
+    const weights = new Map<Terrain, number>();
+    weights.set(this.centerTerrain, gamma);
+    weights.set(tA, (weights.get(tA) || 0) + alpha);
+    weights.set(tB, (weights.get(tB) || 0) + beta);
+    return weights;
+  }
+
   generateMap() {
     this.spawnPoints = [];
     this.safePoints = [];
@@ -137,10 +194,21 @@ export class GameEngine {
         
         let terrain = Terrain.Plains;
         if (isPlayArea) {
+          const weights = this.getTerrainBlend(q, r, s, _hexDirections);
+          let pM = 0, pH = 0, pF = 0, pP = 0;
+          for (const [t, w] of weights.entries()) {
+             const base = this.getTerrainBaseProbabilities(t);
+             pM += w * base.m;
+             pH += w * base.h;
+             pF += w * base.f;
+             pP += w * base.p;
+          }
+
           const rand = this.nextRandom();
-          if (rand < 0.05) terrain = Terrain.Mountains;
-          else if (rand < 0.20) terrain = Terrain.Hills;
-          else if (rand < 0.40) terrain = Terrain.Forest;
+          if (rand < pM) terrain = Terrain.Mountains;
+          else if (rand < pM + pH) terrain = Terrain.Hills;
+          else if (rand < pM + pH + pF) terrain = Terrain.Forest;
+          else terrain = Terrain.Plains;
         } else {
           terrain = Terrain.Mountains; // make edge inherently impassable for placement normally
         }
