@@ -78,18 +78,22 @@ export class GameEngine {
   centerTerrain: Terrain;
   borderTerrain: (Terrain | null)[];
 
+  savedImprovements: Record<string, number>;
+
   constructor(
     threatLevel: number = 0, 
     safeEdges: boolean[] = [false, false, false, false, false, false], 
     seed: number = 12345,
     centerTerrain: Terrain = Terrain.Plains,
-    borderTerrain: (Terrain | null)[] = [null, null, null, null, null, null]
+    borderTerrain: (Terrain | null)[] = [null, null, null, null, null, null],
+    savedImprovements: Record<string, number> = {}
   ) {
     this.threatLevel = threatLevel;
     this.safeEdges = safeEdges;
     this.seed = seed;
     this.centerTerrain = centerTerrain;
     this.borderTerrain = borderTerrain;
+    this.savedImprovements = savedImprovements;
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -235,7 +239,18 @@ export class GameEngine {
           }
         }
 
-        this.state.tiles.set(hexToString(hex), { hex, terrain, borderType, improvementLevel: 0 });
+        const key = hexToString(hex);
+        let improvementLevel = 0;
+        if (isPlayArea && this.savedImprovements && this.savedImprovements[key] !== undefined) {
+          improvementLevel = this.savedImprovements[key];
+        }
+        
+        this.state.tiles.set(key, { hex, terrain, borderType, improvementLevel });
+        
+        if (improvementLevel === 2) {
+          // Re-create pre-existing city
+          this.createCity(hex);
+        }
       }
     }
   }
@@ -786,7 +801,8 @@ export class GameEngine {
         if (!tile) continue;
 
         let enterCost = 1;
-        if (tile.terrain === Terrain.Forest || tile.terrain === Terrain.Hills) enterCost = 2;
+        if (tile.improvementLevel === -1) enterCost = 3;
+        else if (tile.terrain === Terrain.Forest || tile.terrain === Terrain.Hills) enterCost = 2;
         else if (tile.terrain === Terrain.Mountains) enterCost = 5;
 
         const newCost = current.cost + enterCost;
@@ -803,10 +819,15 @@ export class GameEngine {
       const currentTile = this.state.tiles.get(hexToString(enemy.hex));
       let terrainCost = 1;
       if (currentTile) {
-        if (currentTile.terrain === Terrain.Forest || currentTile.terrain === Terrain.Hills) terrainCost = 2;
+        if (currentTile.improvementLevel === -1) terrainCost = 3;
+        else if (currentTile.terrain === Terrain.Forest || currentTile.terrain === Terrain.Hills) terrainCost = 2;
         else if (currentTile.terrain === Terrain.Mountains) terrainCost = 5;
       }
-      let actualSpeed = enemy.speed / terrainCost;
+      let activeSpeed = enemy.speed;
+      if (enemy.type === 'Brute' && currentTile?.improvementLevel === -1) {
+        activeSpeed += 1.0;
+      }
+      let actualSpeed = activeSpeed / terrainCost;
 
       if (enemy.isConverted) {
         const target = enemy.targetId ? this.state.enemies.find(e => e.id === enemy.targetId) : null;
@@ -910,14 +931,16 @@ export class GameEngine {
     const dmgMult = (this.hasTech('BronzeWorking') ? 1.3 : 1.0) * 1.2;
 
     for (const city of this.state.cities) {
-      if (this.hasTech('Irrigation')) {
-        const regen = this.hasFusion('Aqueducts') ? 15 : 5;
-        city.hp = Math.min(city.maxHp, city.hp + regen * dt);
-      }
+      if (city.hp > 0) {
+        if (this.hasTech('Irrigation')) {
+          const regen = this.hasFusion('Aqueducts') ? 15 : 5;
+          city.hp = Math.min(city.maxHp, city.hp + regen * dt);
+        }
 
-      city.timeSinceLastDamage += dt;
-      if (city.timeSinceLastDamage >= 3) {
-        city.hp = Math.min(city.maxHp, city.hp + 2 * dt);
+        city.timeSinceLastDamage += dt;
+        if (city.timeSinceLastDamage >= 3) {
+          city.hp = Math.min(city.maxHp, city.hp + 2 * dt);
+        }
       }
     }
 
@@ -1116,7 +1139,8 @@ export class GameEngine {
       const unitTile = this.state.tiles.get(hexToString(pixelToHex(unit.x, unit.y, HEX_SIZE)));
       let unitTerrainCost = 1;
       if (unitTile) {
-        if (unitTile.terrain === Terrain.Forest || unitTile.terrain === Terrain.Hills) unitTerrainCost = 2;
+        if (unitTile.improvementLevel === -1) unitTerrainCost = 3;
+        else if (unitTile.terrain === Terrain.Forest || unitTile.terrain === Terrain.Hills) unitTerrainCost = 2;
         else if (unitTile.terrain === Terrain.Mountains) unitTerrainCost = 5;
       }
       const actualSpeed = speed / unitTerrainCost;
@@ -1265,7 +1289,7 @@ export class GameEngine {
         if (tile.improvementLevel === 2) {
           const hasCity = this.state.cities.some(c => hexToString(c.hex) === hexToString(tile.hex));
           if (!hasCity) {
-            tile.improvementLevel = 0;
+            tile.improvementLevel = -1;
           }
         }
       }
@@ -1334,7 +1358,11 @@ export class GameEngine {
     if (this.state.focusedHex) {
       const tile = this.state.tiles.get(this.state.focusedHex);
       if (tile) {
-        tile.improvementLevel = (tile.improvementLevel || 0) + 1;
+        if (tile.improvementLevel === -1) {
+          tile.improvementLevel = 1;
+        } else {
+          tile.improvementLevel = (tile.improvementLevel || 0) + 1;
+        }
         this.state.supplies -= 1;
         if (tile.improvementLevel === 2) {
           this.createCity(tile.hex);
@@ -1366,7 +1394,13 @@ export class GameEngine {
   }
 
   instaLose() {
-    this.state.phase = 'GAME_OVER';
-    this.notify(true);
+    if (this.state.phase === 'START') {
+      this.state.phase = 'GAME_OVER';
+      this.notify(true);
+      return;
+    }
+    for (const city of this.state.cities) {
+        city.hp = 0;
+    }
   }
 }

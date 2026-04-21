@@ -7,6 +7,7 @@ import { GameState, Terrain } from './game/Types';
 import { CampaignEngine } from './game/Campaign';
 import { CampaignRenderer } from './game/CampaignRenderer';
 import { ALL_TECHS, FUSIONS } from './game/Content';
+import { get, set, clear } from 'idb-keyval';
 
 const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngine, renderer: Renderer, mousePosRef: React.MutableRefObject<{x: number, y: number}> }) => {
   const [data, setData] = useState<any>(null);
@@ -229,6 +230,21 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view]);
 
+  useEffect(() => {
+    if (gameState && (gameState.phase === 'VICTORY' || gameState.phase === 'GAME_OVER') && activeHexRef.current) {
+      const macroHexId = hexToString(activeHexRef.current);
+      const improvements: Record<string, number> = {};
+      
+      gameState.tiles.forEach((tile: any, key: string) => {
+        if (tile.improvementLevel !== 0 && tile.improvementLevel !== undefined) {
+           improvements[key] = tile.improvementLevel;
+        }
+      });
+      
+      set(`ruins_${macroHexId}`, improvements).catch(e => console.error(e));
+    }
+  }, [gameState?.phase]);
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     mousePosRef.current = {
@@ -237,7 +253,7 @@ export default function App() {
     };
   };
 
-  const startSurvival = (hex: Hex) => {
+  const startSurvival = async (hex: Hex) => {
     activeHexRef.current = hex;
     const tile = campaignEngineRef.current?.tiles.get(hexToString(hex));
     const threatLevel = tile ? tile.threatLevel : 0;
@@ -261,10 +277,16 @@ export default function App() {
        }
     }
     
+    const macroHexId = hexToString(hex);
+    let savedTiles = {};
+    try {
+      savedTiles = await get(`ruins_${macroHexId}`) || {};
+    } catch(e) {}
+
     // Provide a deterministic seed based on coordinate hash plus threat level
     // q and r will uniquely identify the map tile since the campaign map places it deterministically
     const seed = hex.q * 8731 + hex.r * 19283 + hex.s * 7823 + threatLevel * 991;
-    const engine = new GameEngine(threatLevel, safeEdges, seed, centerTerrain, borderTerrain);
+    const engine = new GameEngine(threatLevel, safeEdges, seed, centerTerrain, borderTerrain, savedTiles);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
     setGameState(engine.state);
@@ -463,7 +485,9 @@ export default function App() {
             <button
               onClick={() => {
                 localStorage.removeItem('campaign_save');
-                window.location.reload();
+                clear().then(() => {
+                  window.location.reload();
+                });
               }}
               className="bg-red-900/80 hover:bg-red-800 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-red-700 pointer-events-auto"
             >

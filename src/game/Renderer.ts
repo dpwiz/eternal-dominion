@@ -39,7 +39,27 @@ export class Renderer {
       const isPlayArea = Math.max(Math.abs(tile.hex.q), Math.abs(tile.hex.r), Math.abs(tile.hex.s)) <= MAP_RADIUS;
 
       if (isPlayArea) {
-        this.drawHex(pos.x, pos.y, HEX_SIZE - 1, color);
+        let drawColor = color;
+        if (tile.improvementLevel === -1) {
+          // Tinted gray-ish ruins
+          this.ctx.globalAlpha = 0.5;
+          this.drawHex(pos.x, pos.y, HEX_SIZE - 1, '#111111');
+          this.ctx.globalAlpha = 1.0;
+          drawColor = '#4a4a4a'; // Overlay basic
+        }
+        this.drawHex(pos.x, pos.y, HEX_SIZE - 1,  tile.improvementLevel === -1 ? `color-mix(in srgb, ${color} 40%, #1a1a1a)` : color);
+      }
+
+      if (tile.improvementLevel === -1) {
+         // Draw ruins rubble
+         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+         this.ctx.beginPath();
+         this.ctx.moveTo(pos.x - 8, pos.y + 4);
+         this.ctx.lineTo(pos.x - 2, pos.y - 6);
+         this.ctx.lineTo(pos.x + 6, pos.y + 2);
+         this.ctx.lineTo(pos.x + 10, pos.y - 4);
+         this.ctx.lineTo(pos.x + 14, pos.y + 6);
+         this.ctx.fill();
       }
 
       if (tile.improvementLevel === 1) {
