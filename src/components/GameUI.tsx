@@ -4,6 +4,61 @@ import { ALL_TECHS, FUSIONS } from '../game/Content';
 import { getWaveComposition } from '../game/Engine';
 import { hexToString } from '../game/HexMath';
 
+const getBaseColor = (id: string): string => {
+  switch (id) {
+    case 'Mining':        
+    case 'Archery':       
+    case 'Crossbows':     
+    case 'MountainFortress': 
+      return 'amber'; // Hills
+      
+    case 'Mysticism':     
+    case 'Animism':       
+    case 'Theology':      
+      return 'emerald'; // Forest
+      
+    case 'HorsebackRiding':
+    case 'AnimalHusbandry':
+    case 'WarChariots':
+      return 'lime'; // Plains
+      
+    case 'Masonry':       
+    case 'Irrigation':    
+    case 'Pottery':
+    case 'Aqueducts':
+      return 'white'; // Outpost
+      
+    // Raw Combat / Exploration -> Untinted
+    case 'BronzeWorking':
+    case 'Writing':
+    case 'Exploration':
+    case 'Calendar':
+    default:
+      return 'slate';
+  }
+};
+
+const getTechColorClasses = (base: string) => {
+  if (base === 'white') return { text: 'text-white', border: 'border-slate-300', hoverBorder: 'hover:border-white', glow: 'shadow-[0_0_15px_rgba(255,255,255,0.5)]' };
+  if (base === 'slate') return { text: 'text-slate-300', border: 'border-slate-600', hoverBorder: 'hover:border-slate-400', glow: 'shadow-[0_0_15px_rgba(148,163,184,0.2)]' };
+  if (base === 'amber') return { text: 'text-amber-400', border: 'border-amber-500', hoverBorder: 'hover:border-amber-400', glow: 'shadow-[0_0_15px_rgba(251,191,36,0.4)]' };
+  if (base === 'emerald') return { text: 'text-emerald-400', border: 'border-emerald-500', hoverBorder: 'hover:border-emerald-400', glow: 'shadow-[0_0_15px_rgba(52,211,153,0.4)]' };
+  if (base === 'lime') return { text: 'text-lime-400', border: 'border-lime-500', hoverBorder: 'hover:border-lime-400', glow: 'shadow-[0_0_15px_rgba(163,230,53,0.4)]' };
+  return { text: 'text-white', border: 'border-slate-600', hoverBorder: 'hover:border-slate-400', glow: 'shadow-lg' };
+};
+
+const willTriggerFusion = (techId: string, acquiredTechs: string[]): string | null => {
+  for (const fusion of FUSIONS) {
+    if (fusion.req.includes(techId)) {
+      const otherReqs = fusion.req.filter(r => r !== techId);
+      if (otherReqs.every(r => acquiredTechs.includes(r))) {
+        return fusion.id;
+      }
+    }
+  }
+  return null;
+};
+
 interface GameUIProps {
   state: GameState;
   threatLevel: number;
@@ -209,16 +264,28 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
           <div className="bg-slate-800 p-8 rounded-xl max-w-3xl w-full">
             <h2 className="text-3xl font-bold text-white mb-6 text-center">Level Up!</h2>
             <div className="grid grid-cols-3 gap-6">
-              {state.pendingTechPicks[0].map(tech => (
-                <button
-                  key={tech.id}
-                  onClick={() => onPickTech(tech.id)}
-                  className="bg-slate-700 hover:bg-slate-600 p-6 rounded-lg text-left transition-colors border border-slate-600 hover:border-blue-400 flex flex-col gap-2"
-                >
-                  <span className="text-xl font-bold text-white">{tech.name}</span>
-                  <span className="text-sm text-slate-300">{tech.description}</span>
-                </button>
-              ))}
+              {state.pendingTechPicks[0].map(tech => {
+                const triggeredFusionId = willTriggerFusion(tech.id, state.techs);
+                const titleColorObj = getTechColorClasses(getBaseColor(tech.id));
+                
+                let borderClasses = 'border-slate-600 hover:border-blue-400';
+                
+                if (triggeredFusionId) {
+                  const fusionColorObj = getTechColorClasses(getBaseColor(triggeredFusionId));
+                  borderClasses = `${fusionColorObj.border} ${fusionColorObj.hoverBorder} ${fusionColorObj.glow}`;
+                }
+
+                return (
+                  <button
+                    key={tech.id}
+                    onClick={() => onPickTech(tech.id)}
+                    className={`bg-slate-700 hover:bg-slate-600 p-6 rounded-lg text-left transition-all border ${borderClasses} flex flex-col gap-2`}
+                  >
+                    <span className={`text-xl font-bold ${titleColorObj.text}`}>{tech.name}</span>
+                    <span className="text-sm text-slate-300">{tech.description}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
