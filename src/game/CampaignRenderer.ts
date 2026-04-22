@@ -36,6 +36,7 @@ export class CampaignRenderer {
       if (tile.terrain === Terrain.Hills) color = '#d9b377';
       if (tile.terrain === Terrain.Forest) color = '#4d8c39';
       if (tile.terrain === Terrain.Mountains) color = '#7a7a7a';
+      if (tile.terrain === Terrain.Void) color = '#1e1b4b';
 
       let transparentBorder = false;
 

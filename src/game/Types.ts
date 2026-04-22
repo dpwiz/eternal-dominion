@@ -1,6 +1,6 @@
 import { Hex } from './HexMath';
 
-export enum Terrain { Plains, Hills, Forest, Mountains }
+export enum Terrain { Plains, Hills, Forest, Mountains, Void }
 
 export interface Tile {
   hex: Hex;
@@ -31,6 +31,7 @@ export interface Enemy {
   speed: number;
   damage: number;
   isConverted: boolean;
+  isVoidspawn?: boolean;
   targetId?: string;
 }
 
@@ -89,6 +90,8 @@ export interface FriendlyUnit {
 
 export interface GameState {
   tiles: Map<string, Tile>;
+  safePoints: Hex[];
+  threatPoints: Hex[];
   cities: City[];
   enemies: Enemy[];
   friendlyUnits: FriendlyUnit[];

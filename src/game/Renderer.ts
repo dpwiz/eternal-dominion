@@ -35,6 +35,7 @@ export class Renderer {
       if (tile.terrain === Terrain.Hills) color = '#d9b377';
       if (tile.terrain === Terrain.Forest) color = '#4d8c39';
       if (tile.terrain === Terrain.Mountains) color = '#7a7a7a';
+      if (tile.terrain === Terrain.Void) color = '#0f0e24'; // Extremely deep dark void
 
       const isPlayArea = Math.max(Math.abs(tile.hex.q), Math.abs(tile.hex.r), Math.abs(tile.hex.s)) <= MAP_RADIUS;
 
@@ -81,19 +82,29 @@ export class Renderer {
         this.ctx.stroke();
         this.ctx.setLineDash([]);
       }
+    }
 
-      if (tile.borderType) {
+    if (state.safePoints) {
+      for (const hex of state.safePoints) {
+        const pos = hexToPixel(hex, HEX_SIZE);
         this.ctx.beginPath();
         this.drawHexPath(pos.x, pos.y, HEX_SIZE - 1);
-        if (tile.borderType === 'safe') {
-          this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
-          this.ctx.fill();
-          this.ctx.strokeStyle = 'rgba(2, 132, 199, 0.5)'; // sky-600
-        } else {
-          this.ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; // red-500
-          this.ctx.fill();
-          this.ctx.strokeStyle = 'rgba(185, 28, 28, 0.5)'; // red-700
-        }
+        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)'; // sky-400
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'rgba(2, 132, 199, 0.5)'; // sky-600
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+      }
+    }
+
+    if (state.threatPoints) {
+      for (const hex of state.threatPoints) {
+        const pos = hexToPixel(hex, HEX_SIZE);
+        this.ctx.beginPath();
+        this.drawHexPath(pos.x, pos.y, HEX_SIZE - 1);
+        this.ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; // red-500
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'rgba(185, 28, 28, 0.5)'; // red-700
         this.ctx.lineWidth = 2;
         this.ctx.stroke();
       }
@@ -113,6 +124,7 @@ export class Renderer {
          if (tile.terrain === Terrain.Plains) this.ctx.strokeStyle = '#a3d977';
          else if (tile.terrain === Terrain.Hills) this.ctx.strokeStyle = '#d9b377';
          else if (tile.terrain === Terrain.Forest) this.ctx.strokeStyle = '#4d8c39';
+         else if (tile.terrain === Terrain.Void) this.ctx.strokeStyle = '#1e1b4b';
          else this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
 
          let drawRadius = HEX_SIZE * 1.75;
@@ -222,10 +234,24 @@ export class Renderer {
       const radius = size === 1 ? 4 : (size === 2 ? 6 : 8);
 
       this.ctx.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = enemy.isConverted ? '#38bdf8' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
+      
+      let baseColor = enemy.isConverted ? '#38bdf8' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
+      let strokeColor = enemy.isConverted ? '#0284c7' : '#000';
+      
+      if (!enemy.isConverted && enemy.isVoidspawn) {
+         baseColor = '#4c1d95'; // purple-900 (Darker)
+         strokeColor = '#7e22ce'; // purple-700
+      } else if (enemy.isConverted && enemy.isVoidspawn) {
+         baseColor = '#3b82f6'; // darker blue
+         strokeColor = '#1d4ed8'; // deeper stroke
+      }
+
+      this.ctx.fillStyle = baseColor;
       this.ctx.fill();
-      this.ctx.strokeStyle = enemy.isConverted ? '#0284c7' : '#000';
+      this.ctx.strokeStyle = strokeColor;
+      this.ctx.lineWidth = enemy.isVoidspawn ? 2 : 1;
       this.ctx.stroke();
+      this.ctx.lineWidth = 1;
 
       if (enemy.hp < enemy.maxHp) {
         this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';

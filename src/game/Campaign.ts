@@ -31,7 +31,9 @@ export class CampaignEngine {
         const dist = hexDistance({q:0, r:0, s:0}, hex);
         
         let terrain = Terrain.Plains;
-        if (dist > 0) {
+        if (dist === radius) {
+          terrain = Terrain.Void;
+        } else if (dist > 0) {
           const rand = rng.next();
           if (rand < 0.2) terrain = Terrain.Mountains;
           else if (rand < 0.4) terrain = Terrain.Hills;

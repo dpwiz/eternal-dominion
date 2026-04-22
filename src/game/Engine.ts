@@ -4,6 +4,7 @@ import { ALL_TECHS, FUSIONS } from './Content';
 
 export const HEX_SIZE = 26;
 export const MAP_RADIUS = 10;
+export const OUTSIDE_RADIUS = MAP_RADIUS + 1;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -65,6 +66,7 @@ export function getWaveComposition(turn: number, threatLevel: number) {
 export class GameEngine {
   state: GameState;
   costs: Map<string, number> = new Map();
+  voidCosts: Map<string, number> = new Map();
   spawnPoints: Hex[] = [];
   safePoints: Hex[] = [];
   onStateChange?: (state: GameState) => void;
@@ -101,6 +103,8 @@ export class GameEngine {
   getInitialState(): GameState {
     return {
       tiles: new Map(),
+      safePoints: [],
+      threatPoints: [],
       cities: [],
       enemies: [],
       friendlyUnits: [],
@@ -135,16 +139,17 @@ export class GameEngine {
 
   getTerrainBaseProbabilities(t: Terrain) {
     switch (t) {
+      case Terrain.Void:
+        return { m: 0.00, h: 0.02, f: 0.02, p: 0.01, v: 0.95 };
       case Terrain.Forest:
-        return { m: 0.05, h: 0.15, f: 0.60, p: 0.20 };
+        return { m: 0.05, h: 0.15, f: 0.60, p: 0.20, v: 0 };
       case Terrain.Hills:
-        return { m: 0.20, h: 0.60, f: 0.05, p: 0.15 };
+        return { m: 0.20, h: 0.60, f: 0.05, p: 0.15, v: 0 };
       case Terrain.Mountains:
-        return { m: 0.60, h: 0.20, f: 0.05, p: 0.15 };
+        return { m: 0.60, h: 0.20, f: 0.05, p: 0.15, v: 0 };
       case Terrain.Plains:
       default:
-        // Originally: mountains 0.05, hills 0.15, forest 0.20, plains 0.60
-        return { m: 0.025, h: 0.075, f: 0.10, p: 0.80 };
+        return { m: 0.025, h: 0.075, f: 0.10, p: 0.80, v: 0 };
     }
   }
 
@@ -188,36 +193,70 @@ export class GameEngine {
       { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
     ];
 
-    for (let q = -(MAP_RADIUS + 1); q <= MAP_RADIUS + 1; q++) {
-      for (let r = Math.max(-(MAP_RADIUS + 1), -q - (MAP_RADIUS + 1)); r <= Math.min(MAP_RADIUS + 1, -q + (MAP_RADIUS + 1)); r++) {
+    for (let q = -OUTSIDE_RADIUS; q <= OUTSIDE_RADIUS; q++) {
+      for (let r = Math.max(-OUTSIDE_RADIUS, -q - OUTSIDE_RADIUS); r <= Math.min(OUTSIDE_RADIUS, -q + OUTSIDE_RADIUS); r++) {
         const s = -q - r;
         const hex = { q, r, s };
+        const isOutside = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) === OUTSIDE_RADIUS;
+
+        if (!isOutside) continue;
+
+        const dots = _hexDirections.map(d => d.q * q + d.r * r + d.s * s);
+        const maxDot = Math.max(...dots);
         
-        const isPlayArea = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= MAP_RADIUS;
-        const isEdge = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) === MAP_RADIUS + 1;
+        let isSafe = false;
+        for (let i = 0; i < 6; i++) {
+          if (dots[i] === maxDot) {
+            if (this.safeEdges[i]) {
+              isSafe = true;
+            }
+          }
+        }
+        
+        if (isSafe) {
+            this.state.safePoints.push(hex);
+        } else {
+            this.state.threatPoints.push(hex);
+        }
+      }
+    }
+
+    for (let q = -MAP_RADIUS; q <= MAP_RADIUS; q++) {
+      for (let r = Math.max(-MAP_RADIUS, -q - MAP_RADIUS); r <= Math.min(MAP_RADIUS, -q + MAP_RADIUS); r++) {
+        const s = -q - r;
+        const hex = { q, r, s };
+        const isEdge = Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) === MAP_RADIUS;
         
         let terrain = Terrain.Plains;
-        if (isPlayArea) {
-          const weights = this.getTerrainBlend(q, r, s, _hexDirections);
-          let pM = 0, pH = 0, pF = 0, pP = 0;
-          for (const [t, w] of weights.entries()) {
-             const base = this.getTerrainBaseProbabilities(t);
-             pM += w * base.m;
-             pH += w * base.h;
-             pF += w * base.f;
-             pP += w * base.p;
-          }
-
-          const rand = this.nextRandom();
-          if (rand < pM) terrain = Terrain.Mountains;
-          else if (rand < pM + pH) terrain = Terrain.Hills;
-          else if (rand < pM + pH + pF) terrain = Terrain.Forest;
-          else terrain = Terrain.Plains;
-        } else {
-          terrain = Terrain.Mountains; // make edge inherently impassable for placement normally
+        const weights = this.getTerrainBlend(q, r, s, _hexDirections);
+        let pM = 0, pH = 0, pF = 0, pP = 0, pV = 0;
+        for (const [t, w] of weights.entries()) {
+           const base = this.getTerrainBaseProbabilities(t);
+           pM += w * base.m;
+           pH += w * base.h;
+           pF += w * base.f;
+           pP += w * base.p;
+           pV += w * base.v;
         }
 
-        let borderType: 'safe' | 'threat' | undefined = undefined;
+        const rand = this.nextRandom();
+        if (rand < pV) terrain = Terrain.Void;
+        else if (rand < pV + pM) terrain = Terrain.Mountains;
+        else if (rand < pV + pM + pH) terrain = Terrain.Hills;
+        else if (rand < pV + pM + pH + pF) terrain = Terrain.Forest;
+        else terrain = Terrain.Plains;
+
+        const key = hexToString(hex);
+        let improvementLevel = 0;
+        
+        if (this.savedImprovements && this.savedImprovements[key] !== undefined) {
+           improvementLevel = this.savedImprovements[key];
+        }
+        this.state.tiles.set(key, { hex, terrain, improvementLevel });
+        if (improvementLevel === 2) {
+           // Re-create pre-existing city
+           this.createCity(hex);
+        }
 
         if (isEdge) {
           const dots = _hexDirections.map(d => d.q * q + d.r * r + d.s * s);
@@ -225,31 +264,38 @@ export class GameEngine {
           
           let isSafe = false;
           for (let i = 0; i < 6; i++) {
-             if (dots[i] === maxDot && this.safeEdges[i]) {
+            if (dots[i] === maxDot) {
+              if (this.safeEdges[i]) {
                 isSafe = true;
-             }
+              }
+            }
           }
-
+          
           if (isSafe) {
-             borderType = 'safe';
-             this.safePoints.push(hex);
+            this.safePoints.push(hex);
           } else {
-             borderType = 'threat';
-             this.spawnPoints.push(hex);
+            this.spawnPoints.push(hex);
           }
         }
+      }
+    }
 
-        const key = hexToString(hex);
-        let improvementLevel = 0;
-        if (isPlayArea && this.savedImprovements && this.savedImprovements[key] !== undefined) {
-          improvementLevel = this.savedImprovements[key];
-        }
-        
-        this.state.tiles.set(key, { hex, terrain, borderType, improvementLevel });
-        
-        if (improvementLevel === 2) {
-          // Re-create pre-existing city
-          this.createCity(hex);
+    // Second pass: All tiles adjacent to Void are forced to Mountains
+    const voidTiles: string[] = [];
+    for (const [key, tile] of this.state.tiles.entries()) {
+      if (tile.terrain === Terrain.Void && Math.max(Math.abs(tile.hex.q), Math.abs(tile.hex.r), Math.abs(tile.hex.s)) <= MAP_RADIUS) {
+        voidTiles.push(key);
+      }
+    }
+    for (const key of voidTiles) {
+      const tile = this.state.tiles.get(key)!;
+      for (let i = 0; i < 6; i++) {
+        const neighborHex = hexNeighbor(tile.hex, i);
+        const neighborKey = hexToString(neighborHex);
+        const neighborTile = this.state.tiles.get(neighborKey);
+        // Do not overwrite edges (MAP_RADIUS + 1) or other void tiles
+        if (neighborTile && neighborTile.terrain !== Terrain.Void && Math.max(Math.abs(neighborHex.q), Math.abs(neighborHex.r), Math.abs(neighborHex.s)) <= MAP_RADIUS) {
+          neighborTile.terrain = Terrain.Mountains;
         }
       }
     }
@@ -258,7 +304,7 @@ export class GameEngine {
   handleHexClick(hex: Hex) {
     const key = hexToString(hex);
     const tile = this.state.tiles.get(key);
-    if (!tile || tile.terrain === Terrain.Mountains) return false;
+    if (!tile || tile.terrain === Terrain.Mountains || tile.terrain === Terrain.Void) return false;
 
     if (this.state.phase === 'START') {
       if (tile.improvementLevel === 2) return false;
@@ -365,9 +411,15 @@ export class GameEngine {
     for (const att of attackers) {
         let bestTarget: import('./Types').Enemy | null = null;
         let bestDist = Infinity;
+        
+        const attIsVoidspawn = att.type === 'converted' && att.entity.isVoidspawn;
 
         // 1. Same size (duel)
         for (const h of hostiles) {
+            const hTile = this.state.tiles.get(hexToString(h.hex));
+            const isTargetInaccessible = (!hTile || hTile.terrain === Terrain.Void) && !attIsVoidspawn;
+            if (isTargetInaccessible) continue;
+
             const hSize = this.getEnemySize(h.type);
             const filled = hostileSlots.get(h.id)!;
             if (hSize === att.size && hSize - filled >= att.size) {
@@ -391,6 +443,10 @@ export class GameEngine {
         if (!bestTarget) {
             bestDist = Infinity;
             for (const h of hostiles) {
+                const hTile = this.state.tiles.get(hexToString(h.hex));
+                const isTargetInaccessible = (!hTile || hTile.terrain === Terrain.Void) && !attIsVoidspawn;
+                if (isTargetInaccessible) continue;
+
                 const hSize = this.getEnemySize(h.type);
                 const filled = hostileSlots.get(h.id)!;
                 if (hSize > att.size && hSize - filled >= att.size) {
@@ -687,22 +743,25 @@ export class GameEngine {
   }
 
   getRandomEdgeSpawnPos(spawnHex: Hex): {x: number, y: number} {
-    const insideNeighbors = [];
+    const outsideNeighbors = [];
     for (let i = 0; i < 6; i++) {
-        const nHex = hexNeighbor(spawnHex, i);
-        if (Math.max(Math.abs(nHex.q), Math.abs(nHex.r), Math.abs(nHex.s)) <= MAP_RADIUS) {
-            insideNeighbors.push(nHex);
-        }
+      const nHex = hexNeighbor(spawnHex, i);
+      
+     
+      if (Math.max(Math.abs(nHex.q), Math.abs(nHex.r), Math.abs(nHex.s)) > MAP_RADIUS) {
+        outsideNeighbors.push(nHex);
+      }
     }
     
-    if (insideNeighbors.length === 0) {
-        return hexToPixel(spawnHex, HEX_SIZE);
+    if (outsideNeighbors.length === 0) {
+      return hexToPixel(spawnHex, HEX_SIZE);
     }
     
-    const nHex = insideNeighbors[Math.floor(Math.random() * insideNeighbors.length)];
+    const nHex = outsideNeighbors[Math.floor(Math.random() * outsideNeighbors.length)];
     const p0 = hexToPixel(spawnHex, HEX_SIZE);
     const p1 = hexToPixel(nHex, HEX_SIZE);
     
+    // Midpoint is the geometric edge center
     const mx = (p0.x + p1.x) / 2;
     const my = (p0.y + p1.y) / 2;
     
@@ -715,49 +774,87 @@ export class GameEngine {
     const vx = dx / dist;
     const vy = dy / dist;
     
+    // Perpendicular vector along the edge line
     const px = -vy;
     const py = vx;
     
+    // Assumes HEX_SIZE is the circumradius (center to corner)
     const randomOffset = (Math.random() - 0.5) * HEX_SIZE;
     
+    const edgeX = mx + px * randomOffset;
+    const edgeY = my + py * randomOffset;
+    
+    // Calculate the actual vector from the edge point to the hex center
+    const cx = p0.x - edgeX;
+    const cy = p0.y - edgeY;
+    const centerDist = Math.hypot(cx, cy);
+    
+    if (centerDist === 0) return { x: edgeX, y: edgeY };
+    
+    // Pull back 1 unit directly towards p0
     return {
-        x: mx + px * randomOffset,
-        y: my + py * randomOffset
+      x: edgeX + (cx / centerDist) * 1,
+      y: edgeY + (cy / centerDist) * 1
     };
   }
 
   spawnReinforcements() {
-    if (this.safePoints.length === 0) return;
+    if (!this.validReinforcementSpawns || this.validReinforcementSpawns.length === 0) return;
 
     const turn = this.state.turn;
     const type = 'Scout';
-    const spawnHex = this.safePoints[Math.floor(Math.random() * this.safePoints.length)];
+    const spawnHex = this.validReinforcementSpawns[Math.floor(Math.random() * this.validReinforcementSpawns.length)];
     const pos = this.getRandomEdgeSpawnPos(spawnHex);
+
+    const tile = this.state.tiles.get(hexToString(spawnHex));
+    const isVoidspawn = tile ? tile.terrain === Terrain.Void : false;
 
     let hp = 20, speed = 1.6, damage = 2;
     hp *= (1 + turn * 0.1);
     damage *= (1 + turn * 0.05);
 
+    // XXX: Spawning reinforcements as converted scouts
+    // XXX: The reinforcements are roaming, so pushed into the enemies (should just be "roaming" then) array
     this.state.enemies.push({
       id: Math.random().toString(),
       hex: spawnHex,
       x: pos.x,
       y: pos.y,
-      hp, maxHp: hp, type, speed, damage, isConverted: true
+      hp, maxHp: hp, type, speed, damage, isConverted: true, isVoidspawn
     });
   }
 
   spawnEnemy(type: 'Scout' | 'Warrior' | 'Brute') {
-    if (this.spawnPoints.length === 0) return;
+    if (!this.validEnemySpawns || this.validEnemySpawns.length === 0) return;
 
-    const turn = this.state.turn;
-    const spawnHex = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
+    let spawnHex = this.validEnemySpawns[Math.floor(Math.random() * this.validEnemySpawns.length)];
+    let tile = this.state.tiles.get(hexToString(spawnHex));
+    let cost = this.costs.get(hexToString(spawnHex));
+    let isVoidspawn = (tile && tile.terrain === Terrain.Void) || (cost === undefined || cost >= 999);
+
+    // Give it up to 10 tries to ensure standard units don't spawn on voidspawn-only paths
+    for (let attempts = 0; attempts < 10; attempts++) {
+       if (!isVoidspawn && cost !== undefined && cost < 999) break; // Valid normie
+       if (isVoidspawn) break; // Valid void
+       // Re-roll
+       spawnHex = this.validEnemySpawns[Math.floor(Math.random() * this.validEnemySpawns.length)];
+       tile = this.state.tiles.get(hexToString(spawnHex));
+       cost = this.costs.get(hexToString(spawnHex));
+       isVoidspawn = (tile && tile.terrain === Terrain.Void) || (cost === undefined || cost >= 999);
+    }
+    
+    // Hard bail if still invalid pathing
+    if (!isVoidspawn && (cost === undefined || cost >= 999)) return;
+    const voidC = this.voidCosts.get(hexToString(spawnHex));
+    if (isVoidspawn && (voidC === undefined)) return;
+
     const pos = this.getRandomEdgeSpawnPos(spawnHex);
 
     let hp = 20, speed = 1.5, damage = 1;
     if (type === 'Warrior') { hp = 50; speed = 1.0; damage = 2.5; }
     if (type === 'Brute') { hp = 150; speed = 0.6; damage = 7.5; }
 
+    const turn = this.state.turn;
     hp *= (1 + turn * 0.1);
     damage *= (1 + turn * 0.05);
 
@@ -773,20 +870,28 @@ export class GameEngine {
       hex: spawnHex,
       x: pos.x,
       y: pos.y,
-      hp, maxHp: hp, type, speed, damage, isConverted: false
+      hp, maxHp: hp, type, speed, damage, isConverted: false, isVoidspawn
     });
   }
 
+  validReinforcementSpawns: Hex[] = [];
+  validEnemySpawns: Hex[] = [];
+
   updateFlowField() {
     this.costs.clear();
+    this.voidCosts.clear();
     const queue: { hex: Hex, cost: number }[] = [];
+    const voidQueue: { hex: Hex, cost: number }[] = [];
 
     for (const city of this.state.cities) {
       const key = hexToString(city.hex);
       this.costs.set(key, 0);
+      this.voidCosts.set(key, 0);
       queue.push({ hex: city.hex, cost: 0 });
+      voidQueue.push({ hex: city.hex, cost: 0 });
     }
 
+    // Standard flow field
     while (queue.length > 0) {
       queue.sort((a, b) => b.cost - a.cost);
       const current = queue.pop()!;
@@ -803,8 +908,16 @@ export class GameEngine {
 
         let enterCost = 1;
         if (tile.improvementLevel === -1) enterCost = 3;
+        else if (tile.terrain === Terrain.Void) enterCost = 999;
         else if (tile.terrain === Terrain.Forest || tile.terrain === Terrain.Hills) enterCost = 2;
         else if (tile.terrain === Terrain.Mountains) enterCost = 5;
+
+        // Prevent horizontal propagation along the invisible map border
+        const isCurrentEdge = Math.max(Math.abs(current.hex.q), Math.abs(current.hex.r), Math.abs(current.hex.s)) > MAP_RADIUS;
+        const isNeighborEdge = Math.max(Math.abs(neighbor.q), Math.abs(neighbor.r), Math.abs(neighbor.s)) > MAP_RADIUS;
+        if (isCurrentEdge && isNeighborEdge) {
+           enterCost = 99999;
+        }
 
         const newCost = current.cost + enterCost;
         if (!this.costs.has(nKey) || newCost < this.costs.get(nKey)!) {
@@ -813,6 +926,86 @@ export class GameEngine {
         }
       }
     }
+
+    // Voidspawn flow field (void terrain is perfectly fine to walk on)
+    while (voidQueue.length > 0) {
+      voidQueue.sort((a, b) => b.cost - a.cost);
+      const current = voidQueue.pop()!;
+      const currentKey = hexToString(current.hex);
+
+      if (current.cost > this.voidCosts.get(currentKey)!) continue;
+
+      for (let i = 0; i < 6; i++) {
+        const neighbor = hexNeighbor(current.hex, i);
+        const nKey = hexToString(neighbor);
+        const tile = this.state.tiles.get(nKey);
+
+        if (!tile) continue;
+
+        let enterCost = 1;
+        if (tile.improvementLevel === -1) enterCost = 3;
+        else if (tile.terrain === Terrain.Void) enterCost = 1; // Voidwalk
+        else if (tile.terrain === Terrain.Forest || tile.terrain === Terrain.Hills) enterCost = 2;
+        else if (tile.terrain === Terrain.Mountains) enterCost = 2; // Mountainwalk
+
+        // Prevent horizontal propagation along the invisible map border
+        const isCurrentEdge = Math.max(Math.abs(current.hex.q), Math.abs(current.hex.r), Math.abs(current.hex.s)) > MAP_RADIUS;
+        const isNeighborEdge = Math.max(Math.abs(neighbor.q), Math.abs(neighbor.r), Math.abs(neighbor.s)) > MAP_RADIUS;
+        if (isCurrentEdge && isNeighborEdge) {
+           enterCost = 99999;
+        }
+
+        const newCost = current.cost + enterCost;
+        if (!this.voidCosts.has(nKey) || newCost < this.voidCosts.get(nKey)!) {
+          this.voidCosts.set(nKey, newCost);
+          voidQueue.push({ hex: neighbor, cost: newCost });
+        }
+      }
+    }
+
+    this.validReinforcementSpawns = this.safePoints.filter(hex => {
+      const key = hexToString(hex);
+      const tile = this.state.tiles.get(key);
+      if (!tile || tile.terrain === Terrain.Void) return false;
+      const cost = this.costs.get(key);
+      return cost !== undefined && cost < 999;
+    });
+
+    this.validEnemySpawns = this.spawnPoints.filter(hex => {
+      const key = hexToString(hex);
+      const cost = this.costs.get(key);
+      const voidCost = this.voidCosts.get(key);
+      
+      const passableNormally = cost !== undefined && cost < 999;
+      const passableAsVoidspawn = voidCost !== undefined;
+      
+      return passableNormally || passableAsVoidspawn;
+    });
+  }
+
+  getFlowDirection(hex: Hex, isVoidspawn: boolean = false): { bestNeighbor: Hex, lowestCost: number } | null {
+    const map = isVoidspawn ? this.voidCosts : this.costs;
+    let currentCost = map.get(hexToString(hex));
+    if (currentCost === undefined) currentCost = 9999;
+    if (currentCost === 0) return null;
+
+    let bestNeighbor = hex;
+    let lowestCost = currentCost;
+
+    for (let i = 0; i < 6; i++) {
+        const neighbor = hexNeighbor(hex, i);
+        let cost = map.get(hexToString(neighbor));
+        
+        if (cost !== undefined) {
+           if (cost < lowestCost) {
+              lowestCost = cost;
+              bestNeighbor = neighbor;
+           }
+        }
+    }
+    
+    if (lowestCost >= currentCost) return null;
+    return { bestNeighbor, lowestCost };
   }
 
   updateEnemies(dt: number) {
@@ -821,9 +1014,13 @@ export class GameEngine {
       let terrainCost = 1;
       if (currentTile) {
         if (currentTile.improvementLevel === -1) terrainCost = 3;
+        else if (currentTile.terrain === Terrain.Void) terrainCost = enemy.isVoidspawn ? 1 : 25;
         else if (currentTile.terrain === Terrain.Forest || currentTile.terrain === Terrain.Hills) terrainCost = 2;
-        else if (currentTile.terrain === Terrain.Mountains) terrainCost = 5;
+        else if (currentTile.terrain === Terrain.Mountains) terrainCost = enemy.isVoidspawn ? 2 : 5; // Mountainwalker!
+      } else {
+        terrainCost = enemy.isVoidspawn ? 1 : 25;
       }
+      
       let activeSpeed = enemy.speed;
       if (enemy.type === 'Brute' && currentTile?.improvementLevel === -1) {
         activeSpeed += 1.0;
@@ -838,9 +1035,18 @@ export class GameEngine {
           const dy = target.y - enemy.y;
           const dist = Math.hypot(dx, dy);
           if (dist > 5) {
-            enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
-            enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
-            enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+            const nextX = enemy.x + (dx / dist) * actualSpeed * HEX_SIZE * dt;
+            const nextY = enemy.y + (dy / dist) * actualSpeed * HEX_SIZE * dt;
+            const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
+            const nextTile = this.state.tiles.get(hexToString(nextHex));
+
+            if (!enemy.isVoidspawn && nextTile && nextTile.terrain === Terrain.Void) {
+              enemy.targetId = null; // Drop geometric lock to prevent walking into void
+            } else {
+              enemy.x = nextX;
+              enemy.y = nextY;
+              enemy.hex = nextHex;
+            }
           } else {
             target.hp -= enemy.damage * dt; // Converted strikes Hostile
             enemy.hp -= target.damage * 0.5 * dt; // Hostile passive feedback
@@ -848,23 +1054,28 @@ export class GameEngine {
             if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
           }
         } else {
-          // Fallback: move to most damaged outpost
-          let bestCity = null;
-          let minRatio = Infinity;
-          for (const c of this.state.cities) {
-            const ratio = c.hp / c.maxHp;
-            if (ratio < minRatio) { minRatio = ratio; bestCity = c; }
-          }
-          if (bestCity) {
-            const cp = hexToPixel(bestCity.hex, HEX_SIZE);
-            const dx = cp.x - enemy.x;
-            const dy = cp.y - enemy.y;
+          // Fallback: move to most damaged outpost intelligently
+          const flow = this.getFlowDirection(enemy.hex, false);
+          if (flow) {
+            const targetPos = hexToPixel(flow.bestNeighbor, HEX_SIZE);
+            const dx = targetPos.x - enemy.x;
+            const dy = targetPos.y - enemy.y;
             const dist = Math.hypot(dx, dy);
-            if (dist > HEX_SIZE * 0.5) {
+            if (dist > 1) {
               enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
               enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
               enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
             }
+          } else {
+             const originPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
+             const dox = originPix.x - enemy.x;
+             const doy = originPix.y - enemy.y;
+             const ddist = Math.hypot(dox, doy);
+             if (ddist > 0) {
+                enemy.x += (dox / ddist) * actualSpeed * HEX_SIZE * dt;
+                enemy.y += (doy / ddist) * actualSpeed * HEX_SIZE * dt;
+                enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+             }
           }
         }
         continue;
@@ -886,31 +1097,48 @@ export class GameEngine {
       const speedMult = Math.max(0, 1 - (filledSlots / enemySize));
       actualSpeed *= speedMult;
 
-      const currentCost = this.costs.get(hexToString(enemy.hex)) ?? 9999;
-      if (currentCost === 0) continue;
+      const flow = this.getFlowDirection(enemy.hex, enemy.isVoidspawn);
+      if (!flow) {
+         // Fallback if fully out of flow bounds: move towards origin (0,0)
+         const originPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
+         const dox = originPix.x - enemy.x;
+         const doy = originPix.y - enemy.y;
+         const ddist = Math.hypot(dox, doy);
+         if (ddist > 0) {
+            enemy.x += (dox / ddist) * actualSpeed * HEX_SIZE * dt;
+            enemy.y += (doy / ddist) * actualSpeed * HEX_SIZE * dt;
+            enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+         }
+      } else {
+        const targetPos = hexToPixel(flow.bestNeighbor, HEX_SIZE);
+        const dx = targetPos.x - enemy.x;
+        const dy = targetPos.y - enemy.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-      let bestNeighbor = enemy.hex;
-      let lowestCost = currentCost;
-
-      for (let i = 0; i < 6; i++) {
-        const neighbor = hexNeighbor(enemy.hex, i);
-        const cost = this.costs.get(hexToString(neighbor));
-        if (cost !== undefined && cost < lowestCost) {
-          lowestCost = cost;
-          bestNeighbor = neighbor;
+        if (dist > 0) {
+          const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
+          enemy.x += (dx / dist) * moveDist;
+          enemy.y += (dy / dist) * moveDist;
+          enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
         }
       }
-
-      const targetPos = hexToPixel(bestNeighbor, HEX_SIZE);
-      const dx = targetPos.x - enemy.x;
-      const dy = targetPos.y - enemy.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist > 0) {
-        const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
-        enemy.x += (dx / dist) * moveDist;
-        enemy.y += (dy / dist) * moveDist;
-        enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+      
+      // Strict Boundary Enforcer:
+      // If a unit physically drifts perfectly outside the visible mapped tiles (MAP_RADIUS),
+      // we physically drag them back into the map core (0,0) before the next frame renders.
+      const boundedHex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+      const isOutside = Math.max(Math.abs(boundedHex.q), Math.abs(boundedHex.r), Math.abs(boundedHex.s)) > MAP_RADIUS;
+      if (isOutside) {
+         const centerPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
+         const cx = centerPix.x - enemy.x;
+         const cy = centerPix.y - enemy.y;
+         const cDist = Math.hypot(cx, cy);
+         if (cDist > 0) {
+             const speedCap = Math.max(15, activeSpeed * HEX_SIZE * 2.0); // Make boundary correction fast and dominant
+             enemy.x += (cx / cDist) * speedCap * dt;
+             enemy.y += (cy / cDist) * speedCap * dt;
+             enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+         }
       }
     }
   }
@@ -1092,8 +1320,14 @@ export class GameEngine {
         unit.angle += dt * 0.5;
         const targetX = cityPos.x + Math.cos(unit.angle + orbitOffset) * 8;
         const targetY = cityPos.y + Math.sin(unit.angle + orbitOffset) * 8;
-        unit.x += (targetX - unit.x) * 5 * dt;
-        unit.y += (targetY - unit.y) * 5 * dt;
+        
+        const nextX = unit.x + (targetX - unit.x) * 5 * dt;
+        const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+        const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
+        if (!(nextTile && nextTile.terrain === Terrain.Void)) {
+            unit.x = nextX;
+            unit.y = nextY;
+        }
 
         return true;
       }
@@ -1115,7 +1349,7 @@ export class GameEngine {
               enemy.hp -= this.hasTech('Mysticism') ? 100 : 50;
               this.spawnSparks(enemy.x, enemy.y, enemy.type === 'Brute' ? '#8b0000' : '#ff0000', 8);
               this.spawnSparks(enemy.x, enemy.y, '#a855f7', 5);
-              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && enemy.hp > 0) {
+              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && enemy.hp > 0 && !enemy.isVoidspawn) {
                 enemy.isConverted = true;
                 convertedOne = true;
               }
@@ -1126,8 +1360,14 @@ export class GameEngine {
         unit.angle += dt * 2;
         const targetX = cityPos.x;
         const targetY = cityPos.y - 12 + Math.sin(unit.angle) * 4;
-        unit.x += (targetX - unit.x) * 5 * dt;
-        unit.y += (targetY - unit.y) * 5 * dt;
+        
+        const nextX = unit.x + (targetX - unit.x) * 5 * dt;
+        const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+        const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
+        if (!(nextTile && nextTile.terrain === Terrain.Void)) {
+            unit.x = nextX;
+            unit.y = nextY;
+        }
 
         return true;
       }
@@ -1141,8 +1381,11 @@ export class GameEngine {
       let unitTerrainCost = 1;
       if (unitTile) {
         if (unitTile.improvementLevel === -1) unitTerrainCost = 3;
+        else if (unitTile.terrain === Terrain.Void) unitTerrainCost = 25;
         else if (unitTile.terrain === Terrain.Forest || unitTile.terrain === Terrain.Hills) unitTerrainCost = 2;
         else if (unitTile.terrain === Terrain.Mountains) unitTerrainCost = 5;
+      } else {
+        unitTerrainCost = 25;
       }
       const actualSpeed = speed / unitTerrainCost;
 
@@ -1153,8 +1396,17 @@ export class GameEngine {
           const dy = target.y - unit.y;
           const dist = Math.hypot(dx, dy);
           if (dist > 5) {
-            unit.x += (dx / dist) * actualSpeed * dt;
-            unit.y += (dy / dist) * actualSpeed * dt;
+            const nextX = unit.x + (dx / dist) * actualSpeed * dt;
+            const nextY = unit.y + (dy / dist) * actualSpeed * dt;
+            const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
+            const nextTile = this.state.tiles.get(hexToString(nextHex));
+            
+            if (nextTile && nextTile.terrain === Terrain.Void) {
+               unit.targetId = null;
+            } else {
+               unit.x = nextX;
+               unit.y = nextY;
+            }
           } else {
             // Physical reach - deal damage
             target.hp -= damage * dt;
@@ -1173,8 +1425,13 @@ export class GameEngine {
         
         if (dist > HEX_SIZE * 0.5) {
           unit.state = 'returning';
-          unit.x += (dx / dist) * actualSpeed * dt;
-          unit.y += (dy / dist) * actualSpeed * dt;
+          const nextX = unit.x + (dx / dist) * actualSpeed * dt;
+          const nextY = unit.y + (dy / dist) * actualSpeed * dt;
+          const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
+          if (!(nextTile && nextTile.terrain === Terrain.Void)) {
+            unit.x = nextX;
+            unit.y = nextY;
+          }
         } else {
           if (unit.hp < unit.maxHp && isCavalry) {
             unit.state = 'healing';
@@ -1201,18 +1458,46 @@ export class GameEngine {
             const mdist = Math.hypot(mdx, mdy);
             if (mdist > 0) {
               const moveDist = Math.min(mdist, actualSpeed * dt);
-              unit.x += (mdx / mdist) * moveDist;
-              unit.y += (mdy / mdist) * moveDist;
+              const nextX = unit.x + (mdx / mdist) * moveDist;
+              const nextY = unit.y + (mdy / mdist) * moveDist;
+              const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
+              if (nextTile && nextTile.terrain === Terrain.Void) {
+                unit.angle += dt * 3; // Skim over bad spot faster in orbit 
+              } else {
+                unit.x = nextX;
+                unit.y = nextY;
+              }
             }
           } else {
             unit.angle += dt * 2;
             const targetX = cityPos.x + Math.cos(unit.angle) * (HEX_SIZE * 0.6);
             const targetY = cityPos.y + Math.sin(unit.angle) * (HEX_SIZE * 0.6);
-            unit.x += (targetX - unit.x) * 5 * dt;
-            unit.y += (targetY - unit.y) * 5 * dt;
+            
+            const nextX = unit.x + (targetX - unit.x) * 5 * dt;
+            const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+            const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
+            if (!(nextTile && nextTile.terrain === Terrain.Void)) {
+                unit.x = nextX;
+                unit.y = nextY;
+            }
           }
         }
       }
+
+      const boundedHex = pixelToHex(unit.x, unit.y, HEX_SIZE);
+      const isOutside = Math.max(Math.abs(boundedHex.q), Math.abs(boundedHex.r), Math.abs(boundedHex.s)) > MAP_RADIUS;
+      if (isOutside) {
+         const centerPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
+         const cx = centerPix.x - unit.x;
+         const cy = centerPix.y - unit.y;
+         const cDist = Math.hypot(cx, cy);
+         if (cDist > 0) {
+             const speedCap = Math.max(15, actualSpeed * 2.0);
+             unit.x += (cx / cDist) * speedCap * dt;
+             unit.y += (cy / cDist) * speedCap * dt;
+         }
+      }
+
       return true;
     });
 

@@ -82,6 +82,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
       case Terrain.Hills: return 'Hills';
       case Terrain.Forest: return 'Forest';
       case Terrain.Mountains: return 'Mountains';
+      case Terrain.Void: return 'Void';
       default: return 'Unknown';
     }
   };
@@ -92,6 +93,7 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
       case Terrain.Hills: return 'text-[#d9b377]';
       case Terrain.Forest: return 'text-[#4d8c39]';
       case Terrain.Mountains: return 'text-slate-400';
+      case Terrain.Void: return 'text-purple-400';
       default: return 'text-slate-300';
     }
   };
