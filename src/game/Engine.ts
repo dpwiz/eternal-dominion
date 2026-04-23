@@ -717,12 +717,15 @@ export class GameEngine {
             eng.x += (dx / minDist) * speed * dt;
             eng.y += (dy / minDist) * speed * dt;
           } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
           }
         } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
         }
       }
+      this.world.setComponent(eng.id, Component.Position, [eng.x, eng.y]);
       return true; // Keep engineer
     });
   }
@@ -1355,6 +1358,9 @@ export class GameEngine {
             unit.y = nextY;
         }
 
+        this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+        this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+        this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
         return true;
       }
 
@@ -1395,6 +1401,9 @@ export class GameEngine {
             unit.y = nextY;
         }
 
+        this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+        this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+        this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
         return true;
       }
 
