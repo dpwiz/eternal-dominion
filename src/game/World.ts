@@ -29,7 +29,7 @@ export class World implements IWorld {
 
 
   // Sparse Sets: One per component type
-  private componentSets: Map<number, SparseStore<any>> = new Map();
+  private componentSets: Map<number, SparseStore<TypedArray>> = new Map();
 
   constructor(maxEntities: number) {
     this.capacity = maxEntities;
@@ -71,7 +71,7 @@ export class World implements IWorld {
     this.componentSets.get(comp)!.remove(entity);
   }
 
-  getComponentSet(comp: number): SparseStore<any> {
+  getComponentSet(comp: number): SparseStore<TypedArray> {
     return this.componentSets.get(comp)!;
   }
 

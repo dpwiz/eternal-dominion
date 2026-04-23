@@ -66,5 +66,5 @@ export interface IWorld {
   destroyEntity(entity: number): void;
   addComponent(entity: number, comp: number): void;
   removeComponent(entity: number, comp: number): void;
-  getComponentSet(comp: number): SparseStore<any>;
+  getComponentSet(comp: number): SparseStore<TypedArray>;
 }
