@@ -3,6 +3,7 @@ import { GameState, Terrain } from '../game/Types';
 import { ALL_TECHS, FUSIONS } from '../game/Content';
 import { getWaveComposition } from '../game/Engine';
 import { hexToString } from '../game/HexMath';
+import { World, Component } from '../game/World';
 
 const getBaseColor = (id: string): string => {
   switch (id) {
@@ -61,13 +62,14 @@ const willTriggerFusion = (techId: string, acquiredTechs: string[]): string | nu
 
 interface GameUIProps {
   state: GameState;
+  world: World;
   threatLevel: number;
   onPickTech: (id: string) => void;
   onRestart: () => void;
   onReturnToCampaign?: (victory: boolean) => void;
 }
 
-export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, onRestart, onReturnToCampaign }) => {
+export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPickTech, onRestart, onReturnToCampaign }) => {
   const acquiredTechs = state.techs.map(id => ALL_TECHS.find(t => t.id === id)).filter(Boolean);
   const acquiredFusions = state.fusions.map(id => FUSIONS.find(f => f.id === id)).filter(Boolean);
 
@@ -156,17 +158,18 @@ export const GameUI: React.FC<GameUIProps> = ({ state, threatLevel, onPickTech, 
                 const terrainColor = getTerrainColor(tile?.terrain);
                 const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && u.type === 'guard').length;
                 const maxDefenders = Math.min(6, city.size);
+                const cityHp = world.getStore(Component.Health).get(city.id, 0);
                 return (
                   <div key={city.id} className="flex flex-col text-sm">
                     <div className="flex justify-between items-center text-slate-400 text-xs mt-1">
-                      <span>HP: {Math.floor(city.hp)}/{city.maxHp}</span>
+                      <span>HP: {Math.floor(cityHp)}/{city.maxHp}</span>
                       <span className={`font-medium px-2 ${terrainColor}`}>{terrainName}</span>
                       <span>Guards: {defenders}/{maxDefenders}</span>
                     </div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-1 overflow-hidden">
                       <div 
                         className="bg-red-500 h-full transition-all duration-200" 
-                        style={{ width: `${(city.hp / city.maxHp) * 100}%` }}
+                        style={{ width: `${(cityHp / city.maxHp) * 100}%` }}
                       />
                     </div>
                   </div>

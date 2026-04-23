@@ -179,7 +179,7 @@ export default function App() {
         const hoverHexObj = pixelToHex(worldX, worldY, campaignRendererRef.current.HEX_SIZE);
         campaignRendererRef.current.draw(campaignEngineRef.current, hexToString(hoverHexObj));
       } else if (engineRef.current && rendererRef.current) {
-        rendererRef.current.draw(engineRef.current.state);
+        rendererRef.current.draw(engineRef.current.state, engineRef.current.world);
       }
       
       requestRef.current = requestAnimationFrame(loop);
@@ -392,6 +392,7 @@ export default function App() {
       {view === 'SURVIVAL' && gameState && (
         <GameUI 
           state={gameState} 
+          world={engineRef.current!.world}
           threatLevel={engineRef.current?.threatLevel ?? 0}
           onPickTech={(id) => engineRef.current?.pickTech(id)}
           onRestart={handleRestart}

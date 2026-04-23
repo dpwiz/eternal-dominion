@@ -1,6 +1,7 @@
 import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound, stringToHex } from './HexMath';
-import { GameState, Terrain, Enemy, Tech } from './Types';
+import { GameState, Terrain, Enemy, Tech, MobUnit, FriendlyType, FriendlyState, EngineerState } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
+import { World, Component } from './World';
 
 export const HEX_SIZE = 26;
 export const MAP_RADIUS = 10;
@@ -65,6 +66,7 @@ export function getWaveComposition(turn: number, threatLevel: number) {
 
 export class GameEngine {
   state: GameState;
+  world: World;
   costs: Map<string, number> = new Map();
   voidCosts: Map<string, number> = new Map();
   spawnPoints: Hex[] = [];
@@ -96,6 +98,7 @@ export class GameEngine {
     this.centerTerrain = centerTerrain;
     this.borderTerrain = borderTerrain;
     this.savedImprovements = savedImprovements;
+    this.world = new World(10000);
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -345,48 +348,56 @@ export class GameEngine {
     if (this.hasTech('Pottery')) maxHp += 50;
     if (this.hasTech('Masonry')) maxHp += 50;
 
-    const cityId = Math.random().toString();
+    const cityId = this.world.createEntity();
     this.state.cities.push({
       id: cityId,
       hex,
-      hp: maxHp,
       maxHp,
       archeryCooldown: 0,
       mysticismCooldown: 0,
       timeSinceLastDamage: 0,
       size: 1
     });
+    const cityPos = hexToPixel(hex, HEX_SIZE);
+    this.world.setComponent(cityId, Component.Position, [cityPos.x, cityPos.y]);
+    this.world.setComponent(cityId, Component.Health, maxHp);
   }
 
   hasTech(id: string) { return this.state.techs.includes(id); }
   hasFusion(id: string) { return this.state.fusions.includes(id); }
 
-  getEnemySize(type: 'Scout' | 'Warrior' | 'Brute'): number {
-    return type === 'Scout' ? 1 : (type === 'Warrior' ? 2 : 4);
+  getEnemySize(type: MobUnit): number {
+    return type === MobUnit.Scout ? 1 : (type === MobUnit.Warrior ? 2 : 4);
   }
 
   getFriendlySize(unit: import('./Types').FriendlyUnit): number {
-    if (unit.type === 'guard') return 2;
-    if (unit.type === 'cavalry') {
+    const sFriendlyType = this.world.getStore(Component.FriendlyType);
+
+    if (sFriendlyType.get(unit.id, 0) === FriendlyType.Guard) return 2;
+    if (sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry) {
       const idx = unit.cavalryIndex ?? 0;
       if (idx === 0) return 1;
       if (idx === 1) return 2;
       return 4;
     }
-    if (unit.type === 'mystic') {
+    if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) {
       let size = 1;
       if (this.hasTech('Animism')) size += 1;
       if (this.hasFusion('Theology')) size += 1;
       return size;
     }
-    if (unit.type === 'archer') return 1;
+    if (sFriendlyType.get(unit.id, 0) === FriendlyType.Archer) return 1;
     return 1;
   }
 
   assignTargets() {
+    const sMobType = this.world.getStore(Component.MobType);
+    const sFriendlyType = this.world.getStore(Component.FriendlyType);
+
+    const sPosition = this.world.getStore(Component.Position);
     const hostiles = this.state.enemies.filter(e => !e.isConverted);
-    const hostileSlots = new Map<string, number>();
-    const onOutpost = new Map<string, boolean>();
+    const hostileSlots = new Map<number, number>();
+    const onOutpost = new Map<number, boolean>();
 
     for (const e of hostiles) {
         hostileSlots.set(e.id, 0);
@@ -394,14 +405,14 @@ export class GameEngine {
     }
 
     interface Attacker {
-        id: string; type: 'friendly'|'converted'; size: number;
-        x: number; y: number; cityId?: string; entity: any;
+        id: number; type: 'friendly'|'converted'; size: number;
+        x: number; y: number; cityId?: number; entity: any;
     }
     const attackers: Attacker[] = [];
-    for (const e of this.state.enemies) if (e.isConverted) attackers.push({ id: e.id, type: 'converted', size: this.getEnemySize(e.type), x: e.x, y: e.y, entity: e });
+    for (const e of this.state.enemies) if (e.isConverted) attackers.push({ id: e.id, type: 'converted', size: this.getEnemySize(sMobType.get(e.id, 0)), x: sPosition.get(e.id, 0), y: sPosition.get(e.id, 1), entity: e });
     for (const u of this.state.friendlyUnits) {
-       if (u.type === 'archer' || u.type === 'mystic') continue;
-       attackers.push({ id: u.id, type: 'friendly', size: this.getFriendlySize(u), x: u.x, y: u.y, cityId: u.cityId, entity: u });
+       if (sFriendlyType.get(u.id, 0) === FriendlyType.Archer || sFriendlyType.get(u.id, 0) === FriendlyType.Mystic) continue;
+       attackers.push({ id: u.id, type: 'friendly', size: this.getFriendlySize(u), x: sPosition.get(u.id, 0), y: sPosition.get(u.id, 1), cityId: u.cityId, entity: u });
     }
 
     attackers.sort((a,b) => b.size - a.size);
@@ -420,13 +431,13 @@ export class GameEngine {
             const isTargetInaccessible = (!hTile || hTile.terrain === Terrain.Void) && !attIsVoidspawn;
             if (isTargetInaccessible) continue;
 
-            const hSize = this.getEnemySize(h.type);
+            const hSize = this.getEnemySize(sMobType.get(h.id, 0));
             const filled = hostileSlots.get(h.id)!;
             if (hSize === att.size && hSize - filled >= att.size) {
                 if (att.type === 'friendly') {
                     const city = this.state.cities.find(c => c.id === att.cityId);
                     let range = baseRadius;
-                    if (att.entity.type === 'cavalry') {
+                    if (att.type === 'friendly' ? sFriendlyType.get(att.id, 0) : sMobType.get(att.id, 0) === FriendlyType.Cavalry) {
                        range = 1;
                        if (this.hasTech('HorsebackRiding')) range += 1;
                        if (this.hasTech('AnimalHusbandry')) range += 1;
@@ -434,7 +445,7 @@ export class GameEngine {
                     }
                     if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > range) continue;
                 }
-                const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                const dist = Math.hypot(sPosition.get(h.id, 0) - att.x, sPosition.get(h.id, 1) - att.y);
                 if (dist < bestDist) { bestDist = dist; bestTarget = h; }
             }
         }
@@ -447,13 +458,13 @@ export class GameEngine {
                 const isTargetInaccessible = (!hTile || hTile.terrain === Terrain.Void) && !attIsVoidspawn;
                 if (isTargetInaccessible) continue;
 
-                const hSize = this.getEnemySize(h.type);
+                const hSize = this.getEnemySize(sMobType.get(h.id, 0));
                 const filled = hostileSlots.get(h.id)!;
                 if (hSize > att.size && hSize - filled >= att.size) {
                     if (att.type === 'friendly') {
                         const city = this.state.cities.find(c => c.id === att.cityId);
                         let range = baseRadius;
-                        if (att.entity.type === 'cavalry') {
+                        if (att.type === 'friendly' ? sFriendlyType.get(att.id, 0) : sMobType.get(att.id, 0) === FriendlyType.Cavalry) {
                            range = 1;
                            if (this.hasTech('HorsebackRiding')) range += 1;
                            if (this.hasTech('AnimalHusbandry')) range += 1;
@@ -461,7 +472,7 @@ export class GameEngine {
                         }
                         if (city && !onOutpost.get(h.id) && hexDistance(city.hex, h.hex) > range) continue;
                     }
-                    const dist = Math.hypot(h.x - att.x, h.y - att.y);
+                    const dist = Math.hypot(sPosition.get(h.id, 0) - att.x, sPosition.get(h.id, 1) - att.y);
                     if (dist < bestDist) { bestDist = dist; bestTarget = h; }
                 }
             }
@@ -526,7 +537,7 @@ export class GameEngine {
         this.scoutSpawnTimer -= this.state.currentSpawnRates.scout * dt;
         while (this.scoutSpawnTimer <= 0) {
           this.scoutSpawnTimer += 1.0;
-          this.spawnEnemy('Scout');
+          this.spawnEnemy(MobUnit.Scout);
         }
       } else {
         this.scoutSpawnTimer = 1.0;
@@ -536,7 +547,7 @@ export class GameEngine {
         this.warriorSpawnTimer -= this.state.currentSpawnRates.warrior * dt;
         while (this.warriorSpawnTimer <= 0) {
           this.warriorSpawnTimer += 1.0;
-          this.spawnEnemy('Warrior');
+          this.spawnEnemy(MobUnit.Warrior);
         }
       } else {
         this.warriorSpawnTimer = 1.0;
@@ -546,7 +557,7 @@ export class GameEngine {
         this.bruteSpawnTimer -= this.state.currentSpawnRates.brute * dt;
         while (this.bruteSpawnTimer <= 0) {
           this.bruteSpawnTimer += 1.0;
-          this.spawnEnemy('Brute');
+          this.spawnEnemy(MobUnit.Brute);
         }
       } else {
         this.bruteSpawnTimer = 1.0;
@@ -572,6 +583,11 @@ export class GameEngine {
   }
 
   updateEngineer(dt: number) {
+    const sEngineerState = this.world.getStore(Component.EngineerState);
+
+    const sPosition = this.world.getStore(Component.Position);
+    
+
     if (this.state.focusedHex && this.state.phase === 'PLAYING') {
       const targetHex = stringToHex(this.state.focusedHex);
       
@@ -603,60 +619,62 @@ export class GameEngine {
         // Pick a random adjacent candidate to spawn from
         const candHex = adjCandidates[Math.floor(Math.random() * adjCandidates.length)];
         const pos = hexToPixel(candHex, HEX_SIZE);
+        const engId = this.world.createEntity();
         this.state.engineers.push({
-          id: Math.random().toString(),
-          x: pos.x,
-          y: pos.y,
+          id: engId,
           targetHex: this.state.focusedHex,
           homeCityHex: candHex,
-          state: 'MOVING_TO_WORK',
+          
           workTimer: Math.random(), // Stagger work timers
           offsetX: 0,
           offsetY: 0
         });
+        sPosition.set(engId, pos.x, 0);
+        sEngineerState.set(engId, EngineerState.MovingToWork, 0);
+        sPosition.set(engId, pos.y, 1);
       }
       
       for (const eng of this.state.engineers) {
          if (eng.targetHex !== this.state.focusedHex) {
            eng.targetHex = this.state.focusedHex;
-           eng.state = 'MOVING_TO_WORK';
+           sEngineerState.set(eng.id, EngineerState.MovingToWork, 0);
          }
       }
     } else {
       for (const eng of this.state.engineers) {
-        if (eng.state !== 'RETURNING') {
-          eng.state = 'RETURNING';
+        if (sEngineerState.get(eng.id, 0) !== EngineerState.Returning) {
+          sEngineerState.set(eng.id, EngineerState.Returning, 0);
         }
       }
     }
 
     const speed = 40;
     this.state.engineers = this.state.engineers.filter(eng => {
-      if (eng.state === 'MOVING_TO_WORK' && eng.targetHex) {
+      if (sEngineerState.get(eng.id, 0) === EngineerState.MovingToWork && eng.targetHex) {
         const targetPos = hexToPixel(stringToHex(eng.targetHex), HEX_SIZE);
-        const dx = targetPos.x - eng.x;
-        const dy = targetPos.y - eng.y;
+        const dx = targetPos.x - sPosition.get(eng.id, 0);
+        const dy = targetPos.y - sPosition.get(eng.id, 1);
         const dist = Math.hypot(dx, dy);
         if (dist > 2) {
-          eng.x += (dx / dist) * speed * dt;
-          eng.y += (dy / dist) * speed * dt;
+          sPosition.set(eng.id, sPosition.get(eng.id, 0) + ((dx / dist) * speed * dt), 0);
+          sPosition.set(eng.id, sPosition.get(eng.id, 1) + ((dy / dist) * speed * dt), 1);
         } else {
-          eng.state = 'WORKING';
+          sEngineerState.set(eng.id, EngineerState.Working, 0);
           eng.offsetX = (Math.random() - 0.5) * HEX_SIZE;
           eng.offsetY = (Math.random() - 0.5) * HEX_SIZE;
         }
-      } else if (eng.state === 'WORKING' && eng.targetHex) {
+      } else if (sEngineerState.get(eng.id, 0) === EngineerState.Working && eng.targetHex) {
         const basePos = hexToPixel(stringToHex(eng.targetHex), HEX_SIZE);
         const targetX = basePos.x + eng.offsetX;
         const targetY = basePos.y + eng.offsetY;
         
-        const dx = targetX - eng.x;
-        const dy = targetY - eng.y;
+        const dx = targetX - sPosition.get(eng.id, 0);
+        const dy = targetY - sPosition.get(eng.id, 1);
         const dist = Math.hypot(dx, dy);
         
         if (dist > 1) {
-           eng.x += (dx / dist) * Math.min(dist, speed * dt);
-           eng.y += (dy / dist) * Math.min(dist, speed * dt);
+           sPosition.set(eng.id, sPosition.get(eng.id, 0) + ((dx / dist) * Math.min(dist, speed * dt)), 0);
+           sPosition.set(eng.id, sPosition.get(eng.id, 1) + ((dy / dist) * Math.min(dist, speed * dt)), 1);
         }
         
         eng.workTimer += dt;
@@ -668,9 +686,9 @@ export class GameEngine {
            const xpGain = 1 * xpMult;
            this.state.xp += xpGain;
            this.state.stats.cumulativeXp += xpGain;
-           this.spawnSparks(eng.x, eng.y, '#aaaaaa', 2);
+           this.spawnSparks(sPosition.get(eng.id, 0), sPosition.get(eng.id, 1), '#aaaaaa', 2);
         }
-      } else if (eng.state === 'RETURNING') {
+      } else if (sEngineerState.get(eng.id, 0) === EngineerState.Returning) {
         let closestPos = null;
         let minDist = Infinity;
         
@@ -681,7 +699,7 @@ export class GameEngine {
             const nTile = this.state.tiles.get(hexToString(nHex));
             if (nTile && (nTile.improvementLevel || 0) >= 2) {
               const pos = hexToPixel(nHex, HEX_SIZE);
-              const dist = Math.hypot(pos.x - eng.x, pos.y - eng.y);
+              const dist = Math.hypot(pos.x - sPosition.get(eng.id, 0), pos.y - sPosition.get(eng.id, 1));
               if (dist < minDist) {
                 minDist = dist;
                 closestPos = pos;
@@ -694,7 +712,7 @@ export class GameEngine {
         if (!closestPos) {
            for (const city of this.state.cities) {
              const pos = hexToPixel(city.hex, HEX_SIZE);
-             const dist = Math.hypot(pos.x - eng.x, pos.y - eng.y);
+             const dist = Math.hypot(pos.x - sPosition.get(eng.id, 0), pos.y - sPosition.get(eng.id, 1));
              if (dist < minDist) {
                minDist = dist;
                closestPos = pos;
@@ -703,18 +721,22 @@ export class GameEngine {
         }
 
         if (closestPos) {
-          const dx = closestPos.x - eng.x;
-          const dy = closestPos.y - eng.y;
+          const dx = closestPos.x - sPosition.get(eng.id, 0);
+          const dy = closestPos.y - sPosition.get(eng.id, 1);
           if (minDist > 2) {
-            eng.x += (dx / minDist) * speed * dt;
-            eng.y += (dy / minDist) * speed * dt;
+            sPosition.set(eng.id, sPosition.get(eng.id, 0) + ((dx / minDist) * speed * dt), 0);
+            sPosition.set(eng.id, sPosition.get(eng.id, 1) + ((dy / minDist) * speed * dt), 1);
           } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
           }
         } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
         }
       }
+      sPosition.set(eng.id, sPosition.get(eng.id, 0), 0);
+      sPosition.set(eng.id, sPosition.get(eng.id, 1), 1);
       return true; // Keep engineer
     });
   }
@@ -802,7 +824,7 @@ export class GameEngine {
     if (!this.validReinforcementSpawns || this.validReinforcementSpawns.length === 0) return;
 
     const turn = this.state.turn;
-    const type = 'Scout';
+    const type = MobUnit.Scout;
     const spawnHex = this.validReinforcementSpawns[Math.floor(Math.random() * this.validReinforcementSpawns.length)];
     const pos = this.getRandomEdgeSpawnPos(spawnHex);
 
@@ -815,16 +837,18 @@ export class GameEngine {
 
     // XXX: Spawning reinforcements as converted scouts
     // XXX: The reinforcements are roaming, so pushed into the enemies (should just be "roaming" then) array
+    const eId = this.world.createEntity();
     this.state.enemies.push({
-      id: Math.random().toString(),
+      id: eId,
       hex: spawnHex,
-      x: pos.x,
-      y: pos.y,
-      hp, maxHp: hp, type, speed, damage, isConverted: true, isVoidspawn
+      maxHp: hp, speed, damage, isConverted: true, isVoidspawn
     });
+    this.world.setComponent(eId, Component.Position, [pos.x, pos.y]);
+    this.world.setComponent(eId, Component.Health, hp);
+    this.world.setComponent(eId, Component.MobType, type);
   }
 
-  spawnEnemy(type: 'Scout' | 'Warrior' | 'Brute') {
+  spawnEnemy(type: MobUnit) {
     if (!this.validEnemySpawns || this.validEnemySpawns.length === 0) return;
 
     let spawnHex = this.validEnemySpawns[Math.floor(Math.random() * this.validEnemySpawns.length)];
@@ -851,8 +875,8 @@ export class GameEngine {
     const pos = this.getRandomEdgeSpawnPos(spawnHex);
 
     let hp = 20, speed = 1.5, damage = 1;
-    if (type === 'Warrior') { hp = 50; speed = 1.0; damage = 2.5; }
-    if (type === 'Brute') { hp = 150; speed = 0.6; damage = 7.5; }
+    if (type === MobUnit.Warrior) { hp = 50; speed = 1.0; damage = 2.5; }
+    if (type === MobUnit.Brute) { hp = 150; speed = 0.6; damage = 7.5; }
 
     const turn = this.state.turn;
     hp *= (1 + turn * 0.1);
@@ -865,13 +889,15 @@ export class GameEngine {
       damage *= modifier;
     }
 
+    const eId = this.world.createEntity();
     this.state.enemies.push({
-      id: Math.random().toString(),
+      id: eId,
       hex: spawnHex,
-      x: pos.x,
-      y: pos.y,
-      hp, maxHp: hp, type, speed, damage, isConverted: false, isVoidspawn
+      maxHp: hp, speed, damage, isConverted: false, isVoidspawn
     });
+    this.world.setComponent(eId, Component.Position, [pos.x, pos.y]);
+    this.world.setComponent(eId, Component.Health, hp);
+    this.world.setComponent(eId, Component.MobType, type);
   }
 
   validReinforcementSpawns: Hex[] = [];
@@ -1009,6 +1035,10 @@ export class GameEngine {
   }
 
   updateEnemies(dt: number) {
+    const sMobType = this.world.getStore(Component.MobType);
+
+    const sPosition = this.world.getStore(Component.Position);
+    const sHealth = this.world.getStore(Component.Health);
     for (const enemy of this.state.enemies) {
       const currentTile = this.state.tiles.get(hexToString(enemy.hex));
       let terrainCost = 1;
@@ -1022,7 +1052,7 @@ export class GameEngine {
       }
       
       let activeSpeed = enemy.speed;
-      if (enemy.type === 'Brute' && currentTile?.improvementLevel === -1) {
+      if (sMobType.get(enemy.id, 0) === MobUnit.Brute && currentTile?.improvementLevel === -1) {
         activeSpeed += 1.0;
       }
       let actualSpeed = activeSpeed / terrainCost;
@@ -1031,66 +1061,66 @@ export class GameEngine {
         const target = enemy.targetId ? this.state.enemies.find(e => e.id === enemy.targetId) : null;
 
         if (target) {
-          const dx = target.x - enemy.x;
-          const dy = target.y - enemy.y;
+          const dx = sPosition.get(target.id, 0) - sPosition.get(enemy.id, 0);
+          const dy = sPosition.get(target.id, 1) - sPosition.get(enemy.id, 1);
           const dist = Math.hypot(dx, dy);
           if (dist > 5) {
-            const nextX = enemy.x + (dx / dist) * actualSpeed * HEX_SIZE * dt;
-            const nextY = enemy.y + (dy / dist) * actualSpeed * HEX_SIZE * dt;
+            const nextX = sPosition.get(enemy.id, 0) + (dx / dist) * actualSpeed * HEX_SIZE * dt;
+            const nextY = sPosition.get(enemy.id, 1) + (dy / dist) * actualSpeed * HEX_SIZE * dt;
             const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
             const nextTile = this.state.tiles.get(hexToString(nextHex));
 
             if (!enemy.isVoidspawn && nextTile && nextTile.terrain === Terrain.Void) {
               enemy.targetId = null; // Drop geometric lock to prevent walking into void
             } else {
-              enemy.x = nextX;
-              enemy.y = nextY;
+              sPosition.set(enemy.id, nextX, 0);
+              sPosition.set(enemy.id, nextY, 1);
               enemy.hex = nextHex;
             }
           } else {
-            target.hp -= enemy.damage * dt; // Converted strikes Hostile
-            enemy.hp -= target.damage * 0.5 * dt; // Hostile passive feedback
-            if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
-            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+            sHealth.set(target.id, sHealth.get(target.id, 0) - (enemy.damage * dt), 0); // Converted strikes Hostile
+            sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - (target.damage * 0.5 * dt), 0); // Hostile passive feedback
+            if (Math.random() < dt * 10) this.spawnSparks(sPosition.get(target.id, 0), sPosition.get(target.id, 1), sMobType.get(target.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 1);
+            if (Math.random() < dt * 10) this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#ffffff', 1);
           }
         } else {
           // Fallback: move to most damaged outpost intelligently
           const flow = this.getFlowDirection(enemy.hex, false);
           if (flow) {
             const targetPos = hexToPixel(flow.bestNeighbor, HEX_SIZE);
-            const dx = targetPos.x - enemy.x;
-            const dy = targetPos.y - enemy.y;
+            const dx = targetPos.x - sPosition.get(enemy.id, 0);
+            const dy = targetPos.y - sPosition.get(enemy.id, 1);
             const dist = Math.hypot(dx, dy);
             if (dist > 1) {
-              enemy.x += (dx / dist) * actualSpeed * HEX_SIZE * dt;
-              enemy.y += (dy / dist) * actualSpeed * HEX_SIZE * dt;
-              enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+              sPosition.set(enemy.id, sPosition.get(enemy.id, 0) + ((dx / dist) * actualSpeed * HEX_SIZE * dt), 0);
+              sPosition.set(enemy.id, sPosition.get(enemy.id, 1) + ((dy / dist) * actualSpeed * HEX_SIZE * dt), 1);
+              enemy.hex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
             }
           } else {
              const originPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
-             const dox = originPix.x - enemy.x;
-             const doy = originPix.y - enemy.y;
+             const dox = originPix.x - sPosition.get(enemy.id, 0);
+             const doy = originPix.y - sPosition.get(enemy.id, 1);
              const ddist = Math.hypot(dox, doy);
              if (ddist > 0) {
-                enemy.x += (dox / ddist) * actualSpeed * HEX_SIZE * dt;
-                enemy.y += (doy / ddist) * actualSpeed * HEX_SIZE * dt;
-                enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+                sPosition.set(enemy.id, sPosition.get(enemy.id, 0) + ((dox / ddist) * actualSpeed * HEX_SIZE * dt), 0);
+                sPosition.set(enemy.id, sPosition.get(enemy.id, 1) + ((doy / ddist) * actualSpeed * HEX_SIZE * dt), 1);
+                enemy.hex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
              }
           }
         }
         continue;
       }
 
-      const enemySize = this.getEnemySize(enemy.type);
+      const enemySize = this.getEnemySize(sMobType.get(enemy.id, 0));
       let filledSlots = 0;
       for (const u of this.state.friendlyUnits) {
-        if (u.targetId === enemy.id && Math.hypot(u.x - enemy.x, u.y - enemy.y) < 15) {
+        if (u.targetId === enemy.id && Math.hypot(sPosition.get(u.id, 0) - sPosition.get(enemy.id, 0), sPosition.get(u.id, 1) - sPosition.get(enemy.id, 1)) < 15) {
           filledSlots += this.getFriendlySize(u);
         }
       }
       for (const e of this.state.enemies) {
-        if (e.isConverted && e.targetId === enemy.id && Math.hypot(e.x - enemy.x, e.y - enemy.y) < 15) {
-          filledSlots += this.getEnemySize(e.type);
+        if (e.isConverted && e.targetId === enemy.id && Math.hypot(sPosition.get(e.id, 0) - sPosition.get(enemy.id, 0), sPosition.get(e.id, 1) - sPosition.get(enemy.id, 1)) < 15) {
+          filledSlots += this.getEnemySize(sMobType.get(e.id, 0));
         }
       }
 
@@ -1101,43 +1131,46 @@ export class GameEngine {
       if (!flow) {
          // Fallback if fully out of flow bounds: move towards origin (0,0)
          const originPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
-         const dox = originPix.x - enemy.x;
-         const doy = originPix.y - enemy.y;
+         const dox = originPix.x - sPosition.get(enemy.id, 0);
+         const doy = originPix.y - sPosition.get(enemy.id, 1);
          const ddist = Math.hypot(dox, doy);
          if (ddist > 0) {
-            enemy.x += (dox / ddist) * actualSpeed * HEX_SIZE * dt;
-            enemy.y += (doy / ddist) * actualSpeed * HEX_SIZE * dt;
-            enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+            sPosition.set(enemy.id, sPosition.get(enemy.id, 0) + ((dox / ddist) * actualSpeed * HEX_SIZE * dt), 0);
+            sPosition.set(enemy.id, sPosition.get(enemy.id, 1) + ((doy / ddist) * actualSpeed * HEX_SIZE * dt), 1);
+            enemy.hex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
          }
       } else {
         const targetPos = hexToPixel(flow.bestNeighbor, HEX_SIZE);
-        const dx = targetPos.x - enemy.x;
-        const dy = targetPos.y - enemy.y;
+        const dx = targetPos.x - sPosition.get(enemy.id, 0);
+        const dy = targetPos.y - sPosition.get(enemy.id, 1);
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist > 0) {
           const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
-          enemy.x += (dx / dist) * moveDist;
-          enemy.y += (dy / dist) * moveDist;
-          enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+
+          // NOTE: Previously tried to stop enemies at outpost walls here, but it broke engagement ranges
+          // reverting to naive movement where enemies walk into zero-cost areas and engage directly
+          sPosition.set(enemy.id, sPosition.get(enemy.id, 0) + ((dx / dist) * moveDist), 0);
+          sPosition.set(enemy.id, sPosition.get(enemy.id, 1) + ((dy / dist) * moveDist), 1);
+          enemy.hex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
         }
       }
       
       // Strict Boundary Enforcer:
       // If a unit physically drifts perfectly outside the visible mapped tiles (MAP_RADIUS),
       // we physically drag them back into the map core (0,0) before the next frame renders.
-      const boundedHex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+      const boundedHex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
       const isOutside = Math.max(Math.abs(boundedHex.q), Math.abs(boundedHex.r), Math.abs(boundedHex.s)) > MAP_RADIUS;
       if (isOutside) {
          const centerPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
-         const cx = centerPix.x - enemy.x;
-         const cy = centerPix.y - enemy.y;
+         const cx = centerPix.x - sPosition.get(enemy.id, 0);
+         const cy = centerPix.y - sPosition.get(enemy.id, 1);
          const cDist = Math.hypot(cx, cy);
          if (cDist > 0) {
              const speedCap = Math.max(15, activeSpeed * HEX_SIZE * 2.0); // Make boundary correction fast and dominant
-             enemy.x += (cx / cDist) * speedCap * dt;
-             enemy.y += (cy / cDist) * speedCap * dt;
-             enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+             sPosition.set(enemy.id, sPosition.get(enemy.id, 0) + ((cx / cDist) * speedCap * dt), 0);
+             sPosition.set(enemy.id, sPosition.get(enemy.id, 1) + ((cy / cDist) * speedCap * dt), 1);
+             enemy.hex = pixelToHex(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), HEX_SIZE);
          }
       }
     }
@@ -1156,20 +1189,31 @@ export class GameEngine {
   }
 
   updateCombat(dt: number) {
+    const sMobType = this.world.getStore(Component.MobType);
+    const sFriendlyType = this.world.getStore(Component.FriendlyType);
+    const sFriendlyState = this.world.getStore(Component.FriendlyState);
+
+    const sPosition = this.world.getStore(Component.Position);
+    const sHealth = this.world.getStore(Component.Health);
+    
+    
+
     this.updateCitySizes();
     const dmgMult = (this.hasTech('BronzeWorking') ? 1.3 : 1.0) * 1.2;
 
     for (const city of this.state.cities) {
-      if (city.hp > 0) {
+      let cityHp = sHealth.get(city.id, 0);
+      if (cityHp > 0) {
         if (this.hasTech('Irrigation')) {
           const regen = this.hasFusion('Aqueducts') ? 15 : 5;
-          city.hp = Math.min(city.maxHp, city.hp + regen * dt);
+          cityHp = Math.min(city.maxHp, cityHp + regen * dt);
         }
 
         city.timeSinceLastDamage += dt;
         if (city.timeSinceLastDamage >= 3) {
-          city.hp = Math.min(city.maxHp, city.hp + 2 * dt);
+          cityHp = Math.min(city.maxHp, cityHp + 2 * dt);
         }
+        sHealth.set(city.id, cityHp, 0);
       }
     }
 
@@ -1184,27 +1228,30 @@ export class GameEngine {
       
       for (const unit of this.state.friendlyUnits) {
         if (unit.cityId === city.id) {
-          if (unit.type === 'guard') currentDefenders++;
-          if (unit.type === 'cavalry') currentCavalry++;
-          if (unit.type === 'archer') currentArchers++;
-          if (unit.type === 'mystic') currentMystics++;
+          if (sFriendlyType.get(unit.id, 0) === FriendlyType.Guard) currentDefenders++;
+          if (sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry) currentCavalry++;
+          if (sFriendlyType.get(unit.id, 0) === FriendlyType.Archer) currentArchers++;
+          if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) currentMystics++;
         }
       }
       
       if (currentDefenders < targetDefenders) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
-          type: 'guard',
-          x: pos.x,
-          y: pos.y,
+          
           targetId: null,
-          state: 'idle',
+          
           angle: Math.random() * Math.PI * 2,
-          hp: 50,
           maxHp: 50
         });
+        sPosition.set(uId, pos.x, 0);
+        sPosition.set(uId, pos.y, 1);
+        sHealth.set(uId, 50);
+        sFriendlyType.set(uId, FriendlyType.Guard, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
       }
 
       let targetCavalry = 0;
@@ -1215,19 +1262,22 @@ export class GameEngine {
       }
       if (currentCavalry < targetCavalry) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
-          type: 'cavalry',
+          
           cavalryIndex: currentCavalry,
-          x: pos.x,
-          y: pos.y,
           targetId: null,
-          state: 'idle',
+          
           angle: Math.random() * Math.PI * 2,
-          hp: 100,
           maxHp: 100
         });
+        sPosition.set(uId, pos.x, 0);
+        sPosition.set(uId, pos.y, 1);
+        sHealth.set(uId, 100);
+        sFriendlyType.set(uId, FriendlyType.Cavalry, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
       }
 
       let targetArchers = 0;
@@ -1238,20 +1288,25 @@ export class GameEngine {
       }
       if (currentArchers < targetArchers) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
-          type: 'archer',
+          
           archerIndex: currentArchers,
-          x: pos.x,
-          y: pos.y,
           targetId: null,
-          state: 'idle',
+          
           angle: Math.random() * Math.PI * 2,
-          hp: 50,
           maxHp: 50,
           cooldown: 0
         });
+        sPosition.set(uId, pos.x, 0);
+        sPosition.set(uId, pos.y, 1);
+        sHealth.set(uId, 50);
+        sFriendlyType.set(uId, FriendlyType.Guard, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
+        sFriendlyType.set(uId, FriendlyType.Archer, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
       }
 
       let targetMystics = 0;
@@ -1260,32 +1315,37 @@ export class GameEngine {
       }
       if (currentMystics < targetMystics) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
-          type: 'mystic',
+          
           mysticIndex: currentMystics,
-          x: pos.x,
-          y: pos.y,
           targetId: null,
-          state: 'idle',
+          
           angle: Math.random() * Math.PI * 2,
-          hp: 50,
           maxHp: 50,
           cooldown: 0
         });
+        sPosition.set(uId, pos.x, 0);
+        sPosition.set(uId, pos.y, 1);
+        sHealth.set(uId, 50);
+        sFriendlyType.set(uId, FriendlyType.Guard, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
+        sFriendlyType.set(uId, FriendlyType.Mystic, 0);
+        sFriendlyState.set(uId, FriendlyState.Idle, 0);
       }
     }
 
     // Update friendly units
     this.state.friendlyUnits = this.state.friendlyUnits.filter(unit => {
       const city = this.state.cities.find(c => c.id === unit.cityId);
-      if (!city) return false;
+      if (!city) { this.world.destroyEntity(unit.id); return false; }
 
       const cityPos = hexToPixel(city.hex, HEX_SIZE);
       const tile = this.state.tiles.get(hexToString(city.hex));
 
-      if (unit.type === 'archer') {
+      if (sFriendlyType.get(unit.id, 0) === FriendlyType.Archer) {
         unit.cooldown = (unit.cooldown || 0) - dt;
         if (unit.cooldown <= 0) {
           unit.cooldown = this.hasTech('Archery') ? 1.5 : 2.5;
@@ -1305,14 +1365,15 @@ export class GameEngine {
             }
           }
           if (farthest) {
+            const pId = this.world.createEntity();
             this.state.projectiles.push({
-              id: Math.random().toString(),
-              x: unit.x,
-              y: unit.y,
+              id: pId,
               targetId: farthest.id,
               damage: archDmg,
               speed: 250
             });
+            sPosition.set(pId, sPosition.get(unit.id, 0), 0);
+            sPosition.set(pId, sPosition.get(unit.id, 1), 1);
           }
         }
         
@@ -1321,18 +1382,19 @@ export class GameEngine {
         const targetX = cityPos.x + Math.cos(unit.angle + orbitOffset) * 8;
         const targetY = cityPos.y + Math.sin(unit.angle + orbitOffset) * 8;
         
-        const nextX = unit.x + (targetX - unit.x) * 5 * dt;
-        const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+        const nextX = sPosition.get(unit.id, 0) + (targetX - sPosition.get(unit.id, 0)) * 5 * dt;
+        const nextY = sPosition.get(unit.id, 1) + (targetY - sPosition.get(unit.id, 1)) * 5 * dt;
         const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
         if (!(nextTile && nextTile.terrain === Terrain.Void)) {
-            unit.x = nextX;
-            unit.y = nextY;
+            sPosition.set(unit.id, nextX, 0);
+            sPosition.set(unit.id, nextY, 1);
         }
 
+        sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
         return true;
       }
 
-      if (unit.type === 'mystic') {
+      if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) {
         unit.cooldown = (unit.cooldown || 0) - dt;
         if (unit.cooldown <= 0) {
           unit.cooldown = this.hasTech('Mysticism') ? 3 : 5;
@@ -1346,10 +1408,10 @@ export class GameEngine {
           for (const enemy of this.state.enemies) {
             if (enemy.isConverted) continue;
             if (hexDistance(city.hex, enemy.hex) <= range) {
-              enemy.hp -= this.hasTech('Mysticism') ? 100 : 50;
-              this.spawnSparks(enemy.x, enemy.y, enemy.type === 'Brute' ? '#8b0000' : '#ff0000', 8);
-              this.spawnSparks(enemy.x, enemy.y, '#a855f7', 5);
-              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && enemy.hp > 0 && !enemy.isVoidspawn) {
+              sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - (this.hasTech('Mysticism') ? 100 : 50), 0);
+              this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), sMobType.get(enemy.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 8);
+              this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#a855f7', 5);
+              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && sHealth.get(enemy.id, 0) > 0 && !enemy.isVoidspawn) {
                 enemy.isConverted = true;
                 convertedOne = true;
               }
@@ -1361,23 +1423,26 @@ export class GameEngine {
         const targetX = cityPos.x;
         const targetY = cityPos.y - 12 + Math.sin(unit.angle) * 4;
         
-        const nextX = unit.x + (targetX - unit.x) * 5 * dt;
-        const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+        const nextX = sPosition.get(unit.id, 0) + (targetX - sPosition.get(unit.id, 0)) * 5 * dt;
+        const nextY = sPosition.get(unit.id, 1) + (targetY - sPosition.get(unit.id, 1)) * 5 * dt;
         const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
         if (!(nextTile && nextTile.terrain === Terrain.Void)) {
-            unit.x = nextX;
-            unit.y = nextY;
+            sPosition.set(unit.id, nextX, 0);
+            sPosition.set(unit.id, nextY, 1);
         }
 
+        sPosition.set(unit.id, sPosition.get(unit.id, 0), 0);
+        sPosition.set(unit.id, sPosition.get(unit.id, 1), 1);
+        sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
         return true;
       }
 
-      const isCavalry = unit.type === 'cavalry';
+      const isCavalry = sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry;
       const hillBonus = (this.hasTech('Mining') && tile?.terrain === Terrain.Hills) ? 1.5 : 1.0;
       const damage = (isCavalry ? (this.hasFusion('WarChariots') ? 30 : 10) : 15) * dmgMult * hillBonus;
       const speed = (isCavalry ? (this.hasFusion('WarChariots') ? 3.0 : 2.0) : 1.0) * HEX_SIZE;
 
-      const unitTile = this.state.tiles.get(hexToString(pixelToHex(unit.x, unit.y, HEX_SIZE)));
+      const unitTile = this.state.tiles.get(hexToString(pixelToHex(sPosition.get(unit.id, 0), sPosition.get(unit.id, 1), HEX_SIZE)));
       let unitTerrainCost = 1;
       if (unitTile) {
         if (unitTile.improvementLevel === -1) unitTerrainCost = 3;
@@ -1392,54 +1457,54 @@ export class GameEngine {
       if (unit.targetId) {
         const target = this.state.enemies.find(e => e.id === unit.targetId);
         if (target) {
-          const dx = target.x - unit.x;
-          const dy = target.y - unit.y;
+          const dx = sPosition.get(target.id, 0) - sPosition.get(unit.id, 0);
+          const dy = sPosition.get(target.id, 1) - sPosition.get(unit.id, 1);
           const dist = Math.hypot(dx, dy);
           if (dist > 5) {
-            const nextX = unit.x + (dx / dist) * actualSpeed * dt;
-            const nextY = unit.y + (dy / dist) * actualSpeed * dt;
+            const nextX = sPosition.get(unit.id, 0) + (dx / dist) * actualSpeed * dt;
+            const nextY = sPosition.get(unit.id, 1) + (dy / dist) * actualSpeed * dt;
             const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
             const nextTile = this.state.tiles.get(hexToString(nextHex));
             
             if (nextTile && nextTile.terrain === Terrain.Void) {
                unit.targetId = null;
             } else {
-               unit.x = nextX;
-               unit.y = nextY;
+               sPosition.set(unit.id, nextX, 0);
+               sPosition.set(unit.id, nextY, 1);
             }
           } else {
             // Physical reach - deal damage
-            target.hp -= damage * dt;
-            if (Math.random() < dt * 10) this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 1);
+            sHealth.set(target.id, sHealth.get(target.id, 0) - (damage * dt), 0);
+            if (Math.random() < dt * 10) this.spawnSparks(sPosition.get(target.id, 0), sPosition.get(target.id, 1), sMobType.get(target.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 1);
             // Target deals damage back to guard (feedback)
-            unit.hp -= target.damage * 0.5 * dt;
-            if (Math.random() < dt * 10) this.spawnSparks(unit.x, unit.y, isCavalry ? '#22c55e' : '#4287f5', 1);
-            if (unit.hp <= 0) return false;
+            sHealth.set(unit.id, sHealth.get(unit.id, 0) - (target.damage * 0.5 * dt), 0);
+            if (Math.random() < dt * 10) this.spawnSparks(sPosition.get(unit.id, 0), sPosition.get(unit.id, 1), isCavalry ? '#22c55e' : '#4287f5', 1);
+      if (sHealth.get(unit.id, 0) <= 0) { this.world.destroyEntity(unit.id); return false; }
           }
         }
-        unit.state = 'engaging';
+        sFriendlyState.set(unit.id, FriendlyState.Engaging, 0);
       } else {
-        const dx = cityPos.x - unit.x;
-        const dy = cityPos.y - unit.y;
+        const dx = cityPos.x - sPosition.get(unit.id, 0);
+        const dy = cityPos.y - sPosition.get(unit.id, 1);
         const dist = Math.hypot(dx, dy);
         
         if (dist > HEX_SIZE * 0.5) {
-          unit.state = 'returning';
-          const nextX = unit.x + (dx / dist) * actualSpeed * dt;
-          const nextY = unit.y + (dy / dist) * actualSpeed * dt;
+          sFriendlyState.set(unit.id, FriendlyState.Returning, 0);
+          const nextX = sPosition.get(unit.id, 0) + (dx / dist) * actualSpeed * dt;
+          const nextY = sPosition.get(unit.id, 1) + (dy / dist) * actualSpeed * dt;
           const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
           if (!(nextTile && nextTile.terrain === Terrain.Void)) {
-            unit.x = nextX;
-            unit.y = nextY;
+            sPosition.set(unit.id, nextX, 0);
+            sPosition.set(unit.id, nextY, 1);
           }
         } else {
-          if (unit.hp < unit.maxHp && isCavalry) {
-            unit.state = 'healing';
+          if (sHealth.get(unit.id, 0) < unit.maxHp && isCavalry) {
+            sFriendlyState.set(unit.id, FriendlyState.Healing, 0);
           } else {
-            unit.state = 'idle';
+            sFriendlyState.set(unit.id, FriendlyState.Idle, 0);
           }
 
-          unit.hp = Math.min(unit.maxHp, unit.hp + (unit.state === 'healing' ? 10 : 5) * dt);
+          sHealth.set(unit.id, Math.min(unit.maxHp, sHealth.get(unit.id, 0) + (sFriendlyState.get(unit.id, 0) === FriendlyState.Healing ? 10 : 5) * dt), 0);
           
           if (isCavalry) {
             unit.angle += dt * (this.hasFusion('WarChariots') ? 1.5 : 1.0);
@@ -1453,19 +1518,19 @@ export class GameEngine {
             const targetX = cityPos.x + Math.cos(unit.angle) * orbitRadius;
             const targetY = cityPos.y + Math.sin(unit.angle) * orbitRadius;
             
-            const mdx = targetX - unit.x;
-            const mdy = targetY - unit.y;
+            const mdx = targetX - sPosition.get(unit.id, 0);
+            const mdy = targetY - sPosition.get(unit.id, 1);
             const mdist = Math.hypot(mdx, mdy);
             if (mdist > 0) {
               const moveDist = Math.min(mdist, actualSpeed * dt);
-              const nextX = unit.x + (mdx / mdist) * moveDist;
-              const nextY = unit.y + (mdy / mdist) * moveDist;
+              const nextX = sPosition.get(unit.id, 0) + (mdx / mdist) * moveDist;
+              const nextY = sPosition.get(unit.id, 1) + (mdy / mdist) * moveDist;
               const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
               if (nextTile && nextTile.terrain === Terrain.Void) {
                 unit.angle += dt * 3; // Skim over bad spot faster in orbit 
               } else {
-                unit.x = nextX;
-                unit.y = nextY;
+                sPosition.set(unit.id, nextX, 0);
+                sPosition.set(unit.id, nextY, 1);
               }
             }
           } else {
@@ -1473,59 +1538,68 @@ export class GameEngine {
             const targetX = cityPos.x + Math.cos(unit.angle) * (HEX_SIZE * 0.6);
             const targetY = cityPos.y + Math.sin(unit.angle) * (HEX_SIZE * 0.6);
             
-            const nextX = unit.x + (targetX - unit.x) * 5 * dt;
-            const nextY = unit.y + (targetY - unit.y) * 5 * dt;
+            const nextX = sPosition.get(unit.id, 0) + (targetX - sPosition.get(unit.id, 0)) * 5 * dt;
+            const nextY = sPosition.get(unit.id, 1) + (targetY - sPosition.get(unit.id, 1)) * 5 * dt;
             const nextTile = this.state.tiles.get(hexToString(pixelToHex(nextX, nextY, HEX_SIZE)));
             if (!(nextTile && nextTile.terrain === Terrain.Void)) {
-                unit.x = nextX;
-                unit.y = nextY;
+                sPosition.set(unit.id, nextX, 0);
+                sPosition.set(unit.id, nextY, 1);
             }
           }
         }
       }
 
-      const boundedHex = pixelToHex(unit.x, unit.y, HEX_SIZE);
+      const boundedHex = pixelToHex(sPosition.get(unit.id, 0), sPosition.get(unit.id, 1), HEX_SIZE);
       const isOutside = Math.max(Math.abs(boundedHex.q), Math.abs(boundedHex.r), Math.abs(boundedHex.s)) > MAP_RADIUS;
       if (isOutside) {
          const centerPix = hexToPixel({q:0, r:0, s:0}, HEX_SIZE);
-         const cx = centerPix.x - unit.x;
-         const cy = centerPix.y - unit.y;
+         const cx = centerPix.x - sPosition.get(unit.id, 0);
+         const cy = centerPix.y - sPosition.get(unit.id, 1);
          const cDist = Math.hypot(cx, cy);
          if (cDist > 0) {
              const speedCap = Math.max(15, actualSpeed * 2.0);
-             unit.x += (cx / cDist) * speedCap * dt;
-             unit.y += (cy / cDist) * speedCap * dt;
+             sPosition.set(unit.id, sPosition.get(unit.id, 0) + ((cx / cDist) * speedCap * dt), 0);
+             sPosition.set(unit.id, sPosition.get(unit.id, 1) + ((cy / cDist) * speedCap * dt), 1);
          }
       }
 
+
+      sPosition.set(unit.id, sPosition.get(unit.id, 0), 0);
+      sPosition.set(unit.id, sPosition.get(unit.id, 1), 1);
+      sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
       return true;
     });
 
     // Update projectiles
     this.state.projectiles = this.state.projectiles.filter(p => {
       const target = this.state.enemies.find(e => e.id === p.targetId);
-      if (!target) return false;
-      const dx = target.x - p.x;
-      const dy = target.y - p.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < 5) {
-        target.hp -= p.damage;
-        this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 5);
+      if (!target) {
+        this.world.destroyEntity(p.id);
         return false;
       }
-      p.x += (dx / dist) * p.speed * dt;
-      p.y += (dy / dist) * p.speed * dt;
+      const dx = sPosition.get(target.id, 0) - sPosition.get(p.id, 0);
+      const dy = sPosition.get(target.id, 1) - sPosition.get(p.id, 1);
+      const dist = Math.hypot(dx, dy);
+      if (dist < 5) {
+        sHealth.set(target.id, sHealth.get(target.id, 0) - (p.damage), 0);
+        this.spawnSparks(sPosition.get(target.id, 0), sPosition.get(target.id, 1), sMobType.get(target.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 5);
+        this.world.destroyEntity(p.id);
+        return false;
+      }
+      sPosition.set(p.id, sPosition.get(p.id, 0) + ((dx / dist) * p.speed * dt), 0);
+      sPosition.set(p.id, sPosition.get(p.id, 1) + ((dy / dist) * p.speed * dt), 1);
+
       return true;
     });
 
-    const cityPatrolDamage = new Map<string, number>();
+    const cityPatrolDamage = new Map<number, number>();
     for (const city of this.state.cities) { cityPatrolDamage.set(city.id, 0); }
     for (const unit of this.state.friendlyUnits) {
-      if (unit.state === 'idle' || unit.state === 'healing') {
+      if (sFriendlyState.get(unit.id, 0) === FriendlyState.Idle || sFriendlyState.get(unit.id, 0) === FriendlyState.Healing) {
         const city = this.state.cities.find(c => c.id === unit.cityId);
         if (!city) continue;
         const tile = this.state.tiles.get(hexToString(city.hex));
-        const isCavalry = unit.type === 'cavalry';
+        const isCavalry = sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry;
         const hillBonus = (this.hasTech('Mining') && tile?.terrain === Terrain.Hills) ? 1.5 : 1.0;
         const damage = (isCavalry ? (this.hasFusion('WarChariots') ? 30 : 10) : 15) * dmgMult * hillBonus;
         cityPatrolDamage.set(unit.cityId, (cityPatrolDamage.get(unit.cityId) || 0) + damage);
@@ -1540,13 +1614,13 @@ export class GameEngine {
         if (city) {
           const armor = this.hasTech('Masonry') ? (this.hasFusion('Aqueducts') ? 3 : 1) : 0;
           const dmg = Math.max(1, enemy.damage - armor) * dt;
-          city.hp -= dmg;
+          sHealth.set(city.id, Math.max(0, sHealth.get(city.id, 0) - dmg), 0);
           city.timeSinceLastDamage = 0;
           
           const patrolDmg = cityPatrolDamage.get(city.id) || 0;
           if (patrolDmg > 0) {
-            enemy.hp -= patrolDmg * 0.5 * dt; // Patrol feedback damage
-            if (Math.random() < dt * 10) this.spawnSparks(enemy.x, enemy.y, '#ffffff', 1);
+            sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - (patrolDmg * 0.5 * dt), 0); // Patrol feedback damage
+            if (Math.random() < dt * 10) this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#ffffff', 1);
           }
 
           const pos = hexToPixel(city.hex, HEX_SIZE);
@@ -1557,18 +1631,27 @@ export class GameEngine {
 
     const xpMult = this.hasTech('Writing') ? 1.25 : 1.0;
     this.state.enemies = this.state.enemies.filter(e => {
-      if (e.hp <= 0) {
+      if (sHealth.get(e.id, 0) <= 0) {
         const xpGain = (e.maxHp * 0.1) * xpMult;
         this.state.xp += xpGain;
         this.state.stats.cumulativeXp += xpGain;
         this.state.stats.threatsKilled++;
+        this.world.destroyEntity(e.id);
         return false;
       }
+
+      sPosition.set(e.id, sPosition.get(e.id, 0), 0);
+      sPosition.set(e.id, sPosition.get(e.id, 1), 1);
+      sHealth.set(e.id, sHealth.get(e.id, 0), 0);
       return true;
     });
 
     const initialCities = this.state.cities.length;
-    this.state.cities = this.state.cities.filter(c => c.hp > 0);
+    this.state.cities = this.state.cities.filter(c => {
+        if (sHealth.get(c.id, 0) <= 0) { this.world.destroyEntity(c.id); return false; }
+        sHealth.set(c.id, sHealth.get(c.id, 0), 0);
+        return true;
+    });
     if (this.state.cities.length < initialCities) {
       this.state.stats.citiesLost += (initialCities - this.state.cities.length);
       for (const tile of this.state.tiles.values()) {
@@ -1612,13 +1695,15 @@ export class GameEngine {
   }
 
   pickTech(techId: string) {
+    const sHealth = this.world.getStore(Component.Health);
     this.state.techs.push(techId);
     this.state.pendingTechPicks.shift();
 
     if (techId === 'Masonry') {
       for (const city of this.state.cities) {
         city.maxHp += 50;
-        city.hp += 50;
+        
+        sHealth.set(city.id, sHealth.get(city.id, 0) + 50, 0);
       }
     }
 
@@ -1675,18 +1760,21 @@ export class GameEngine {
 
   instaWin() {
     this.state.phase = 'VICTORY';
+    for (const e of this.state.enemies) this.world.destroyEntity(e.id);
     this.state.enemies = [];
     this.notify(true);
   }
 
   instaLose() {
+    const sHealth = this.world.getStore(Component.Health);
     if (this.state.phase === 'START') {
       this.state.phase = 'GAME_OVER';
       this.notify(true);
       return;
     }
+    
     for (const city of this.state.cities) {
-        city.hp = 0;
+        sHealth.set(city.id, 0, 0);
     }
   }
 }

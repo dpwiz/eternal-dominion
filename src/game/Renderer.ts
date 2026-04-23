@@ -1,6 +1,7 @@
-import { GameState, Terrain } from './Types';
+import { GameState, Terrain, MobUnit, FriendlyType, FriendlyState, EngineerState } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
 import { HEX_SIZE, MAP_RADIUS } from './Engine';
+import { World, Component } from './World';
 
 export class Renderer {
   ctx: CanvasRenderingContext2D;
@@ -23,7 +24,13 @@ export class Renderer {
     this.camera.y = this.height / 2 + HEX_SIZE * Math.sqrt(3);
   }
 
-  draw(state: GameState) {
+  draw(state: GameState, world: World) {
+    const sPosition = world.getStore(Component.Position);
+    const sHealth = world.getStore(Component.Health);
+    const sMobType = world.getStore(Component.MobType);
+    const sFriendlyType = world.getStore(Component.FriendlyType);
+
+
     this.ctx.clearRect(0, 0, this.width, this.height);
     this.ctx.save();
     this.ctx.translate(this.camera.x, this.camera.y);
@@ -115,9 +122,10 @@ export class Renderer {
       const pos = hexToPixel(city.hex, HEX_SIZE);
       this.drawHex(pos.x, pos.y, HEX_SIZE, '#ffffff');
 
-      if (city.hp < city.maxHp) {
+      const city_hp = sHealth.get(city.id);
+      if (city_hp < city.maxHp) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city.hp / city.maxHp), 4);
+        this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city_hp / city.maxHp), 4);
       }
 
       if (tile) {
@@ -161,26 +169,33 @@ export class Renderer {
       this.ctx.beginPath();
       
       let unitSize = 1;
-      if (unit.type === 'guard') unitSize = 2;
-      else if (unit.type === 'cavalry') {
+      if (sFriendlyType.get(unit.id, 0) === FriendlyType.Guard) unitSize = 2;
+      else if (sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry) {
          const idx = unit.cavalryIndex ?? 0;
          if (idx === 0) unitSize = 1;
          else if (idx === 1) unitSize = 2;
          else unitSize = 4;
       }
-      else if (unit.type === 'mystic') {
+      else if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) {
          unitSize = 1;
          if (state.techs.includes('Animism')) unitSize += 1;
          if (state.fusions.includes('Theology')) unitSize += 1;
       }
       const radius = unitSize <= 1 ? 4 : (unitSize === 2 ? 6 : 8);
       
-      this.ctx.arc(unit.x, unit.y, radius, 0, Math.PI * 2);
+      let renderX = sPosition.get(unit.id, 0);
+      let renderY = sPosition.get(unit.id, 1);
+      if (sPosition.has(unit.id)) {
+          renderX = sPosition.get(unit.id, 0);
+          renderY = sPosition.get(unit.id, 1);
+      }
+
+      this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
 
       let fillColor = '#4287f5'; // guard
-      if (unit.type === 'cavalry') fillColor = '#22c55e';
-      else if (unit.type === 'archer') fillColor = '#eab308'; // yellow-500
-      else if (unit.type === 'mystic') fillColor = '#a855f7'; // purple-500
+      if (sFriendlyType.get(unit.id, 0) === FriendlyType.Cavalry) fillColor = '#22c55e';
+      else if (sFriendlyType.get(unit.id, 0) === FriendlyType.Archer) fillColor = '#eab308'; // yellow-500
+      else if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) fillColor = '#a855f7'; // purple-500
 
       this.ctx.fillStyle = fillColor;
       this.ctx.fill();
@@ -188,28 +203,29 @@ export class Renderer {
       this.ctx.lineWidth = 1;
       this.ctx.stroke();
 
-      if (unit.hp < unit.maxHp) {
+      const unit_hp = sHealth.get(unit.id);
+      if (unit_hp < unit.maxHp) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(unit.x - radius, unit.y - radius - 4, radius * 2 * (unit.hp / unit.maxHp), 2);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (unit_hp / unit.maxHp), 2);
       }
     }
 
     // Draw projectiles
     for (const p of state.projectiles) {
       this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      this.ctx.arc(sPosition.get(p.id, 0), sPosition.get(p.id, 1), 3, 0, Math.PI * 2);
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fill();
       
       const target = state.enemies.find(e => e.id === p.targetId);
       if (target) {
-         const dx = target.x - p.x;
-         const dy = target.y - p.y;
+         const dx = sPosition.get(target.id, 0) - sPosition.get(p.id, 0);
+         const dy = sPosition.get(target.id, 1) - sPosition.get(p.id, 1);
          const dist = Math.hypot(dx, dy);
          if (dist > 0) {
            this.ctx.beginPath();
-           this.ctx.moveTo(p.x, p.y);
-           this.ctx.lineTo(p.x - (dx/dist)*10, p.y - (dy/dist)*10);
+           this.ctx.moveTo(sPosition.get(p.id, 0), sPosition.get(p.id, 1));
+           this.ctx.lineTo(sPosition.get(p.id, 0) - (dx/dist)*10, sPosition.get(p.id, 1) - (dy/dist)*10);
            this.ctx.strokeStyle = '#ffaa00';
            this.ctx.lineWidth = 2;
            this.ctx.stroke();
@@ -230,12 +246,19 @@ export class Renderer {
     for (const enemy of state.enemies) {
       this.ctx.beginPath();
       
-      const size = enemy.type === 'Scout' ? 1 : (enemy.type === 'Warrior' ? 2 : 3);
+      const size = sMobType.get(enemy.id, 0) === MobUnit.Scout ? 1 : (sMobType.get(enemy.id, 0) === MobUnit.Warrior ? 2 : 3);
       const radius = size === 1 ? 4 : (size === 2 ? 6 : 8);
 
-      this.ctx.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+      let renderX = sPosition.get(enemy.id, 0);
+      let renderY = sPosition.get(enemy.id, 1);
+      if (sPosition.has(enemy.id)) {
+          renderX = sPosition.get(enemy.id, 0);
+          renderY = sPosition.get(enemy.id, 1);
+      }
+
+      this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
       
-      let baseColor = enemy.isConverted ? '#38bdf8' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
+      let baseColor = enemy.isConverted ? '#38bdf8' : (sMobType.get(enemy.id, 0) === MobUnit.Brute ? '#8b0000' : sMobType.get(enemy.id, 0) === MobUnit.Warrior ? '#ff4500' : '#ff8c00');
       let strokeColor = enemy.isConverted ? '#0284c7' : '#000';
       
       if (!enemy.isConverted && enemy.isVoidspawn) {
@@ -253,15 +276,22 @@ export class Renderer {
       this.ctx.stroke();
       this.ctx.lineWidth = 1;
 
-      if (enemy.hp < enemy.maxHp) {
+      const enemy_hp = sHealth.get(enemy.id);
+      if (enemy_hp < enemy.maxHp) {
         this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
-        this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (enemy_hp / enemy.maxHp), 2);
       }
     }
 
     for (const eng of state.engineers) {
       this.ctx.beginPath();
-      this.ctx.arc(eng.x, eng.y, 4, 0, Math.PI * 2);
+      let renderX = sPosition.get(eng.id, 0);
+      let renderY = sPosition.get(eng.id, 1);
+      if (sPosition.has(eng.id)) {
+          renderX = sPosition.get(eng.id, 0);
+          renderY = sPosition.get(eng.id, 1);
+      }
+      this.ctx.arc(renderX, renderY, 4, 0, Math.PI * 2);
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fill();
       this.ctx.strokeStyle = '#000000';

@@ -2,17 +2,16 @@ import { Hex } from './HexMath';
 
 export enum Terrain { Plains, Hills, Forest, Mountains, Void }
 
-export interface Tile {
-  hex: Hex;
-  terrain: Terrain;
-  borderType?: 'safe' | 'threat';
-  improvementLevel?: number; // 0, 1, 2
-}
+export enum MobUnit { Scout, Warrior, Brute }
+export enum FriendlyType { Guard, Cavalry, Archer, Mystic }
+export enum FriendlyState { Idle, Engaging, Melee, Returning, Healing }
+export enum EngineerState { MovingToWork, Working, Returning }
+
+// Entities
 
 export interface City {
-  id: string;
+  id: number;
   hex: Hex;
-  hp: number;
   maxHp: number;
   archeryCooldown: number;
   mysticismCooldown: number;
@@ -21,31 +20,42 @@ export interface City {
 }
 
 export interface Enemy {
-  id: string;
+  id: number;
   hex: Hex;
-  x: number;
-  y: number;
-  hp: number;
   maxHp: number;
-  type: 'Scout' | 'Warrior' | 'Brute';
   speed: number;
   damage: number;
   isConverted: boolean;
   isVoidspawn?: boolean;
-  targetId?: string;
+  targetId?: number;
 }
 
-export interface Tech {
-  id: string;
-  name: string;
-  description: string;
+export interface Engineer {
+  id: number;
+  targetHex: string | null;
+  homeCityHex: Hex | null;
+  workTimer: number;
+  offsetX: number;
+  offsetY: number;
 }
+
+export interface FriendlyUnit {
+  id: number;
+  cityId: number;
+  cavalryIndex?: number;
+  archerIndex?: number;
+  mysticIndex?: number;
+  targetId: number | null;
+  angle: number;
+  maxHp: number;
+  cooldown?: number;
+}
+
+// Ephemera
 
 export interface Projectile {
-  id: string;
-  x: number;
-  y: number;
-  targetId: string;
+  id: number;
+  targetId: number;
   damage: number;
   speed: number;
 }
@@ -59,33 +69,18 @@ export interface Particle {
   color: string;
 }
 
-export interface Engineer {
-  id: string;
-  x: number;
-  y: number;
-  targetHex: string | null;
-  homeCityHex: Hex | null;
-  state: 'MOVING_TO_WORK' | 'WORKING' | 'RETURNING';
-  workTimer: number;
-  offsetX: number;
-  offsetY: number;
+// Globals
+
+export interface Tile {
+  hex: Hex;
+  terrain: Terrain;
+  improvementLevel?: number; // 0, 1, 2
 }
 
-export interface FriendlyUnit {
+export interface Tech {
   id: string;
-  cityId: string;
-  type: 'guard' | 'cavalry' | 'archer' | 'mystic';
-  cavalryIndex?: number;
-  archerIndex?: number;
-  mysticIndex?: number;
-  x: number;
-  y: number;
-  targetId: string | null;
-  state: 'idle' | 'engaging' | 'melee' | 'returning' | 'healing';
-  angle: number;
-  hp: number;
-  maxHp: number;
-  cooldown?: number;
+  name: string;
+  description: string;
 }
 
 export interface GameState {
