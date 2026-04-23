@@ -57,14 +57,43 @@ export class SparseStore<T extends TypedArray> {
   }
 }
 
-export interface IWorld {
-  readonly capacity: number;
-  nextEntityId: number;
-  freeIds: number[];
+export abstract class GenericWorld<C extends number> {
+  public readonly capacity: number;
+  public nextEntityId: number = 0;
+  public freeIds: number[] = [];
 
-  createEntity(): number;
-  destroyEntity(entity: number): void;
-  addComponent(entity: number, comp: number): void;
-  removeComponent(entity: number, comp: number): void;
-  getComponentSet(comp: number): SparseStore<TypedArray>;
+  protected stores: SparseStore<TypedArray>[];
+
+  constructor(capacity: number, maxComponents: number) {
+    this.capacity = capacity;
+    this.stores = new Array(maxComponents);
+  }
+
+  createEntity(): number {
+    const id = this.freeIds.length > 0
+      ? this.freeIds.pop()!
+      : this.nextEntityId++;
+
+    if (id >= this.capacity) throw new Error("World capacity reached!");
+    return id;
+  }
+
+  destroyEntity(entity: number) {
+    for (const store of this.stores) {
+      if (store) store.remove(entity);
+    }
+    this.freeIds.push(entity);
+  }
+
+  addComponent(entity: number, comp: C) {
+    this.stores[comp as number].add(entity);
+  }
+
+  removeComponent(entity: number, comp: C) {
+    this.stores[comp as number].remove(entity);
+  }
+
+  getStore<T extends TypedArray>(comp: C): SparseStore<T> {
+    return this.stores[comp as number] as SparseStore<T>;
+  }
 }

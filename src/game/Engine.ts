@@ -1525,9 +1525,9 @@ export class GameEngine {
       }
 
 
-      this.world.getComponentSet(Component.Position).set(unit.id, unit.x, 0);
-      this.world.getComponentSet(Component.Position).set(unit.id, unit.y, 1);
-      this.world.getComponentSet(Component.Health).set(unit.id, unit.hp, 0);
+      this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+      this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+      this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
       return true;
     });
 
@@ -1601,16 +1601,16 @@ export class GameEngine {
         return false;
       }
 
-      this.world.getComponentSet(Component.Position).set(e.id, e.x, 0);
-      this.world.getComponentSet(Component.Position).set(e.id, e.y, 1);
-      this.world.getComponentSet(Component.Health).set(e.id, e.hp, 0);
+      this.world.getStore(Component.Position).set(e.id, e.x, 0);
+      this.world.getStore(Component.Position).set(e.id, e.y, 1);
+      this.world.getStore(Component.Health).set(e.id, e.hp, 0);
       return true;
     });
 
     const initialCities = this.state.cities.length;
     this.state.cities = this.state.cities.filter(c => {
         if (c.hp <= 0) { this.world.destroyEntity(c.id); return false; }
-        this.world.getComponentSet(Component.Health).set(c.id, c.hp, 0);
+        this.world.getStore(Component.Health).set(c.id, c.hp, 0);
         return true;
     });
     if (this.state.cities.length < initialCities) {

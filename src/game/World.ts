@@ -1,5 +1,5 @@
 import { openDB } from 'idb';
-import { SparseStore, IWorld, TypedArray } from './ECS';
+import { SparseStore, GenericWorld, TypedArray } from './ECS';
 
 // --- Configuration & Types ---
 
@@ -22,62 +22,20 @@ export interface WorldSave {
 
 // --- The World ---
 
-export class World implements IWorld {
-  public readonly capacity: number;
-  public nextEntityId: number = 0;
-  public freeIds: number[] = [];
-
-
-  // Sparse Sets: One per component type
-  private componentSets: Map<number, SparseStore<TypedArray>> = new Map();
-
+export class World extends GenericWorld<Component> {
   constructor(maxEntities: number) {
-    this.capacity = maxEntities;
+    super(maxEntities, Component.MAX_COMPONENTS);
 
-    this.componentSets.set(Component.Position, new SparseStore(maxEntities, Float32Array, 2));
-    this.componentSets.set(Component.Velocity, new SparseStore(maxEntities, Float32Array, 2));
-    this.componentSets.set(Component.Health, new SparseStore(maxEntities, Uint16Array, 1));
-    this.componentSets.set(Component.UnitType, new SparseStore(maxEntities, Uint8Array, 1));
-    this.componentSets.set(Component.UnitState, new SparseStore(maxEntities, Uint8Array, 1));
-  }
-
-
-  // --- Entity Management ---
-
-  createEntity(): number {
-    const id = this.freeIds.length > 0
-      ? this.freeIds.pop()!
-      : this.nextEntityId++;
-
-    if (id >= this.capacity) throw new Error("World capacity reached!");
-    return id;
-  }
-
-  destroyEntity(entity: number) {
-    for (const store of this.componentSets.values()) {
-      store.remove(entity);
-    }
-    this.freeIds.push(entity);
-  }
-
-  // --- Component Management ---
-
-
-  addComponent(entity: number, comp: number) {
-    this.componentSets.get(comp)!.add(entity);
-  }
-
-  removeComponent(entity: number, comp: number) {
-    this.componentSets.get(comp)!.remove(entity);
-  }
-
-  getComponentSet(comp: number): SparseStore<TypedArray> {
-    return this.componentSets.get(comp)!;
+    this.stores[Component.Position] = new SparseStore(maxEntities, Float32Array, 2);
+    this.stores[Component.Velocity] = new SparseStore(maxEntities, Float32Array, 2);
+    this.stores[Component.Health] = new SparseStore(maxEntities, Uint16Array, 1);
+    this.stores[Component.UnitType] = new SparseStore(maxEntities, Uint8Array, 1);
+    this.stores[Component.UnitState] = new SparseStore(maxEntities, Uint8Array, 1);
   }
 
   setComponent(entity: number, comp: Component, value: any) {
     this.addComponent(entity, comp);
-    const store = this.getComponentSet(comp);
+    const store = this.getStore(comp);
     switch (comp) {
       case Component.Position:
       case Component.Velocity:
@@ -92,18 +50,16 @@ export class World implements IWorld {
     }
   }
 
-  // --- Persistence ---
-
   async saveToIndexedDB(slotId: string) {
-    const sparseSetsData = Array.from(this.componentSets.entries()).map(([comp, set]) => ({
+    const sparseSetsData = this.stores.map((store, comp) => ({
       comp,
-      count: set.count,
-      dense: set.dense.slice().buffer,
-      sparse: set.sparse.slice().buffer,
-      data: set.data.slice().buffer
+      count: store.count,
+      dense: store.dense.slice().buffer,
+      sparse: store.sparse.slice().buffer,
+      data: store.data.slice().buffer
     }));
 
-    const saveState = {
+    const saveState: WorldSave = {
       id: slotId,
       capacity: this.capacity,
       nextEntityId: this.nextEntityId,
@@ -131,7 +87,7 @@ export class World implements IWorld {
     world.freeIds = saveState.freeIds;
 
     for (const savedSet of saveState.sparseSetsData) {
-      const store = world.getComponentSet(savedSet.comp);
+      const store = world.getStore(savedSet.comp);
       store.count = savedSet.count;
       store.dense.set(new Int32Array(savedSet.dense));
       store.sparse.set(new Int32Array(savedSet.sparse));
@@ -143,5 +99,4 @@ export class World implements IWorld {
 
     return world;
   }
-
 }
