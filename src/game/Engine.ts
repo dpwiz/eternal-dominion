@@ -1138,8 +1138,12 @@ export class GameEngine {
           const nextY = enemy.y + (dy / dist) * moveDist;
           const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
 
+          // Allow enemy to step somewhat inside the edge to hit engagement range visually
           if (!enemy.isConverted && this.costs.get(hexToString(nextHex)) === 0 && hexToString(nextHex) !== hexToString(enemy.hex)) {
-             // Stop at outpost edge
+             // Stop at outpost edge, but pull slightly inwards
+             const edgeDist = Math.min(dist, (actualSpeed * HEX_SIZE * dt) + (HEX_SIZE * 0.3));
+             enemy.x += (dx / dist) * edgeDist;
+             enemy.y += (dy / dist) * edgeDist;
           } else {
              enemy.x = nextX;
              enemy.y = nextY;
