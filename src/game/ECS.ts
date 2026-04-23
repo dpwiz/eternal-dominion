@@ -144,9 +144,14 @@ export abstract class GenericWorld<C extends number> {
         store.dense.set(new Int32Array(savedSet.dense));
         store.sparse.set(new Int32Array(savedSet.sparse));
 
-        if (store.data instanceof Float32Array) store.data.set(new Float32Array(savedSet.data));
+                if (store.data instanceof Float64Array) store.data.set(new Float64Array(savedSet.data));
+        else if (store.data instanceof Float32Array) store.data.set(new Float32Array(savedSet.data));
+        else if (store.data instanceof Uint32Array) store.data.set(new Uint32Array(savedSet.data));
         else if (store.data instanceof Uint16Array) store.data.set(new Uint16Array(savedSet.data));
         else if (store.data instanceof Uint8Array) store.data.set(new Uint8Array(savedSet.data));
+        else if (store.data instanceof Int32Array) store.data.set(new Int32Array(savedSet.data));
+        else if (store.data instanceof Int16Array) store.data.set(new Int16Array(savedSet.data));
+        else if (store.data instanceof Int8Array) store.data.set(new Int8Array(savedSet.data));
       }
     }
 
