@@ -96,4 +96,61 @@ export abstract class GenericWorld<C extends number> {
   getStore<T extends TypedArray>(comp: C): SparseStore<T> {
     return this.stores[comp as number] as SparseStore<T>;
   }
+
+  async saveToIndexedDB(slotId: string, dbName: string) {
+    const sparseSetsData = this.stores.map((store, comp) => {
+      if (!store) return null;
+      return {
+        comp,
+        count: store.count,
+        dense: store.dense.slice().buffer,
+        sparse: store.sparse.slice().buffer,
+        data: store.data.slice().buffer
+      };
+    }).filter(Boolean);
+
+    const saveState = {
+      id: slotId,
+      capacity: this.capacity,
+      nextEntityId: this.nextEntityId,
+      freeIds: [...this.freeIds],
+      sparseSetsData,
+    };
+
+    const { openDB } = await import('idb');
+    const db = await openDB(dbName, 1, {
+      upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
+    });
+
+    await db.put('saves', saveState);
+  }
+
+  async loadFromIndexedDB(slotId: string, dbName: string): Promise<boolean> {
+    const { openDB } = await import('idb');
+    const db = await openDB(dbName, 1, {
+      upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
+    });
+    const saveState = await db.get('saves', slotId) as any;
+
+    if (!saveState) return false;
+
+    this.nextEntityId = saveState.nextEntityId;
+    this.freeIds = saveState.freeIds;
+
+    for (const savedSet of saveState.sparseSetsData) {
+      const store = this.getStore(savedSet.comp);
+      if (store) {
+        store.count = savedSet.count;
+        store.dense.set(new Int32Array(savedSet.dense));
+        store.sparse.set(new Int32Array(savedSet.sparse));
+
+        if (store.data instanceof Float32Array) store.data.set(new Float32Array(savedSet.data));
+        else if (store.data instanceof Uint16Array) store.data.set(new Uint16Array(savedSet.data));
+        else if (store.data instanceof Uint8Array) store.data.set(new Uint8Array(savedSet.data));
+      }
+    }
+
+    return true;
+  }
+
 }

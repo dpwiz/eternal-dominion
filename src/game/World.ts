@@ -1,4 +1,3 @@
-import { openDB } from 'idb';
 import { SparseStore, GenericWorld, TypedArray } from './ECS';
 
 // --- Configuration & Types ---
@@ -50,53 +49,16 @@ export class World extends GenericWorld<Component> {
     }
   }
 
+
+  // Game-specific wrappers to match previous static signatures or expected defaults
   async saveToIndexedDB(slotId: string) {
-    const sparseSetsData = this.stores.map((store, comp) => ({
-      comp,
-      count: store.count,
-      dense: store.dense.slice().buffer,
-      sparse: store.sparse.slice().buffer,
-      data: store.data.slice().buffer
-    }));
-
-    const saveState: WorldSave = {
-      id: slotId,
-      capacity: this.capacity,
-      nextEntityId: this.nextEntityId,
-      freeIds: [...this.freeIds],
-      sparseSetsData,
-    };
-
-    const db = await openDB('GameDatabase', 1, {
-      upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
-    });
-
-    await db.put('saves', saveState);
+    await super.saveToIndexedDB(slotId, 'GameDatabase');
   }
 
   static async loadFromIndexedDB(slotId: string): Promise<World | null> {
-    const db = await openDB('GameDatabase', 1, {
-      upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
-    });
-    const saveState = await db.get('saves', slotId) as any;
-
-    if (!saveState) return null;
-
-    const world = new World(saveState.capacity);
-    world.nextEntityId = saveState.nextEntityId;
-    world.freeIds = saveState.freeIds;
-
-    for (const savedSet of saveState.sparseSetsData) {
-      const store = world.getStore(savedSet.comp);
-      store.count = savedSet.count;
-      store.dense.set(new Int32Array(savedSet.dense));
-      store.sparse.set(new Int32Array(savedSet.sparse));
-
-      if (store.data instanceof Float32Array) store.data.set(new Float32Array(savedSet.data));
-      else if (store.data instanceof Uint16Array) store.data.set(new Uint16Array(savedSet.data));
-      else if (store.data instanceof Uint8Array) store.data.set(new Uint8Array(savedSet.data));
-    }
-
+    const world = new World(10000); // Create default world, load logic fills it
+    const success = await world.loadFromIndexedDB(slotId, 'GameDatabase');
+    if (!success) return null;
     return world;
   }
 }
