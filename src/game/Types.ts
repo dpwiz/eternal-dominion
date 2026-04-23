@@ -10,7 +10,7 @@ export interface Tile {
 }
 
 export interface City {
-  id: string;
+  id: number;
   hex: Hex;
   hp: number;
   maxHp: number;
@@ -21,7 +21,7 @@ export interface City {
 }
 
 export interface Enemy {
-  id: string;
+  id: number;
   hex: Hex;
   x: number;
   y: number;
@@ -32,7 +32,7 @@ export interface Enemy {
   damage: number;
   isConverted: boolean;
   isVoidspawn?: boolean;
-  targetId?: string;
+  targetId?: number;
 }
 
 export interface Tech {
@@ -42,10 +42,10 @@ export interface Tech {
 }
 
 export interface Projectile {
-  id: string;
+  id: number;
   x: number;
   y: number;
-  targetId: string;
+  targetId: number;
   damage: number;
   speed: number;
 }
@@ -60,7 +60,7 @@ export interface Particle {
 }
 
 export interface Engineer {
-  id: string;
+  id: number;
   x: number;
   y: number;
   targetHex: string | null;
@@ -72,15 +72,15 @@ export interface Engineer {
 }
 
 export interface FriendlyUnit {
-  id: string;
-  cityId: string;
+  id: number;
+  cityId: number;
   type: 'guard' | 'cavalry' | 'archer' | 'mystic';
   cavalryIndex?: number;
   archerIndex?: number;
   mysticIndex?: number;
   x: number;
   y: number;
-  targetId: string | null;
+  targetId: number | null;
   state: 'idle' | 'engaging' | 'melee' | 'returning' | 'healing';
   angle: number;
   hp: number;

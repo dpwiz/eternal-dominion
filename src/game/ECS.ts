@@ -1,43 +1,26 @@
-import { openDB } from 'idb';
+export type TypedArray =
+  | Float32Array | Float64Array
+  | Int8Array | Int16Array | Int32Array
+  | Uint8Array | Uint16Array | Uint32Array;
 
-// --- Configuration & Types ---
-
-export enum Component {
-  Position = 0,
-  Velocity = 1,
-  Health = 2,
-  GameState = 3,
+export interface TypedArrayConstructor<T extends TypedArray> {
+  new (length: number): T;
+  new (buffer: ArrayBuffer): T;
 }
 
-// Adjust this to match your total number of component types
-const MAX_COMPONENTS = 4; 
-
-export interface WorldSave {
-  id: string;
-  capacity: number;
-  nextEntityId: number;
-  freeIds: number[];
-  
-  // Raw binary buffers for zero-garbage storage
-  positionsBuffer: ArrayBuffer;
-  velocitiesBuffer: ArrayBuffer;
-  healthsBuffer: ArrayBuffer;
-  gameStateBuffer: ArrayBuffer;
-
-  // We must also save the sparse sets to know which entities have which components
-  sparseSetsData: { dense: ArrayBuffer; sparse: ArrayBuffer; count: number }[];
-}
-
-// --- Core Data Structures ---
-
-export class SparseSet {
+export class SparseStore<T extends TypedArray> {
   public dense: Int32Array;
   public sparse: Int32Array;
   public count: number = 0;
 
-  constructor(capacity: number) {
+  public data: T;
+  public readonly stride: number;
+
+  constructor(capacity: number, ArrayType: TypedArrayConstructor<T>, stride: number = 1) {
     this.dense = new Int32Array(capacity);
     this.sparse = new Int32Array(capacity).fill(-1);
+    this.data = new ArrayType(capacity * stride);
+    this.stride = stride;
   }
 
   add(entity: number) {
@@ -64,45 +47,31 @@ export class SparseSet {
   has(entity: number): boolean {
     return this.sparse[entity] !== -1;
   }
+
+  get(entity: number, element: number = 0): number {
+    return this.data[entity * this.stride + element];
+  }
+
+  set(entity: number, value: number, element: number = 0): void {
+    this.data[entity * this.stride + element] = value;
+  }
 }
 
-// --- The World ---
-
-export class World {
+export abstract class GenericWorld<C extends number> {
   public readonly capacity: number;
   public nextEntityId: number = 0;
   public freeIds: number[] = [];
 
-  // Sparse Sets: One per component type
-  private componentSets: SparseSet[];
+  protected stores: SparseStore<TypedArray>[];
 
-  // Component Data (Struct of Arrays)
-  public positions: Float32Array;
-  public velocities: Float32Array;
-  public healths: Uint16Array;
-  public gameState: Uint8Array; // Used for triggering checkpoints
-
-  constructor(maxEntities: number) {
-    this.capacity = maxEntities;
-    
-    // Initialize exactly one SparseSet per component type
-    this.componentSets = Array.from(
-      { length: MAX_COMPONENTS }, 
-      () => new SparseSet(maxEntities)
-    );
-
-    // Pre-allocate TypedArrays for component data
-    this.positions = new Float32Array(maxEntities * 2);
-    this.velocities = new Float32Array(maxEntities * 2);
-    this.healths = new Uint16Array(maxEntities);
-    this.gameState = new Uint8Array(maxEntities);
+  constructor(capacity: number, maxComponents: number) {
+    this.capacity = capacity;
+    this.stores = new Array(maxComponents);
   }
 
-  // --- Entity Management ---
-
   createEntity(): number {
-    const id = this.freeIds.length > 0 
-      ? this.freeIds.pop()! 
+    const id = this.freeIds.length > 0
+      ? this.freeIds.pop()!
       : this.nextEntityId++;
 
     if (id >= this.capacity) throw new Error("World capacity reached!");
@@ -110,129 +79,83 @@ export class World {
   }
 
   destroyEntity(entity: number) {
-    // Remove entity from all component sets so systems ignore it
-    for (let i = 0; i < MAX_COMPONENTS; i++) {
-      this.componentSets[i].remove(entity);
+    for (const store of this.stores) {
+      if (store) store.remove(entity);
     }
     this.freeIds.push(entity);
   }
 
-  // --- Component Management ---
-
-  addComponent(entity: number, comp: Component) {
-    this.componentSets[comp].add(entity);
+  addComponent(entity: number, comp: C) {
+    this.stores[comp as number].add(entity);
   }
 
-  removeComponent(entity: number, comp: Component) {
-    this.componentSets[comp].remove(entity);
+  removeComponent(entity: number, comp: C) {
+    this.stores[comp as number].remove(entity);
   }
 
-  getComponentSet(comp: Component): SparseSet {
-    return this.componentSets[comp];
+  getStore<T extends TypedArray>(comp: C): SparseStore<T> {
+    return this.stores[comp as number] as SparseStore<T>;
   }
 
-  // --- Persistence ---
+  async saveToIndexedDB(slotId: string, dbName: string) {
+    const sparseSetsData = this.stores.map((store, comp) => {
+      if (!store) return null;
+      return {
+        comp,
+        count: store.count,
+        dense: store.dense.slice().buffer,
+        sparse: store.sparse.slice().buffer,
+        data: store.data.slice().buffer
+      };
+    }).filter(Boolean);
 
-  async saveToIndexedDB(slotId: string) {
-    // Serialize sparse sets
-    const sparseSetsData = this.componentSets.map(set => ({
-      count: set.count,
-      // .slice() copies only the data, .buffer extracts the ArrayBuffer for IDB
-      dense: set.dense.slice().buffer, 
-      sparse: set.sparse.slice().buffer
-    }));
-
-    const saveState: WorldSave = {
+    const saveState = {
       id: slotId,
       capacity: this.capacity,
       nextEntityId: this.nextEntityId,
       freeIds: [...this.freeIds],
-      
       sparseSetsData,
-      positionsBuffer: this.positions.slice().buffer,
-      velocitiesBuffer: this.velocities.slice().buffer,
-      healthsBuffer: this.healths.slice().buffer,
-      gameStateBuffer: this.gameState.slice().buffer,
     };
 
-    const db = await openDB('GameDatabase', 1, {
+    const { openDB } = await import('idb');
+    const db = await openDB(dbName, 1, {
       upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
     });
-    
+
     await db.put('saves', saveState);
   }
 
-  static async loadFromIndexedDB(slotId: string): Promise<World | null> {
-    const db = await openDB('GameDatabase', 1, {
+  async loadFromIndexedDB(slotId: string, dbName: string): Promise<boolean> {
+    const { openDB } = await import('idb');
+    const db = await openDB(dbName, 1, {
       upgrade(db) { db.createObjectStore('saves', { keyPath: 'id' }); }
     });
-    const saveState = await db.get('saves', slotId) as WorldSave;
+    const saveState = await db.get('saves', slotId) as any;
 
-    if (!saveState) return null;
+    if (!saveState) return false;
 
-    const world = new World(saveState.capacity);
-    world.nextEntityId = saveState.nextEntityId;
-    world.freeIds = saveState.freeIds;
+    this.nextEntityId = saveState.nextEntityId;
+    this.freeIds = saveState.freeIds;
 
-    // Restore component arrays via fast .set()
-    world.positions.set(new Float32Array(saveState.positionsBuffer));
-    world.velocities.set(new Float32Array(saveState.velocitiesBuffer));
-    world.healths.set(new Uint16Array(saveState.healthsBuffer));
-    world.gameState.set(new Uint8Array(saveState.gameStateBuffer));
+    for (const savedSet of saveState.sparseSetsData) {
+      const store = this.getStore(savedSet.comp);
+      if (store) {
+        store.count = savedSet.count;
+        store.dense.set(new Int32Array(savedSet.dense));
+        store.sparse.set(new Int32Array(savedSet.sparse));
 
-    // Restore Sparse Sets
-    for (let i = 0; i < MAX_COMPONENTS; i++) {
-      const savedSet = saveState.sparseSetsData[i];
-      world.componentSets[i].count = savedSet.count;
-      world.componentSets[i].dense.set(new Int32Array(savedSet.dense));
-      world.componentSets[i].sparse.set(new Int32Array(savedSet.sparse));
-    }
-
-    return world;
-  }
-}
-
-// --- The Game Loop ---
-
-export class GameLoop {
-  private world: World;
-  private isSaveRequested: boolean = false;
-  private currentSaveSlot: string = "checkpoint_auto";
-
-  constructor(world: World) {
-    this.world = world;
-  }
-
-  requestCheckpoint(slotId: string) {
-    this.isSaveRequested = true;
-    this.currentSaveSlot = slotId;
-  }
-
-  async tick(dt: number) {
-    // 1. Example of Sparse Set Intersection logic running in a system
-    const posSet = this.world.getComponentSet(Component.Position);
-    const velSet = this.world.getComponentSet(Component.Velocity);
-
-    const [leadSet, checkSet] = posSet.count < velSet.count 
-      ? [posSet, velSet] 
-      : [velSet, posSet];
-
-    for (let i = 0; i < leadSet.count; i++) {
-      const entity = leadSet.dense[i];
-      if (checkSet.has(entity)) {
-         this.world.positions[entity * 2]     += this.world.velocities[entity * 2] * dt;
-         this.world.positions[entity * 2 + 1] += this.world.velocities[entity * 2 + 1] * dt;
+                if (store.data instanceof Float64Array) store.data.set(new Float64Array(savedSet.data));
+        else if (store.data instanceof Float32Array) store.data.set(new Float32Array(savedSet.data));
+        else if (store.data instanceof Uint32Array) store.data.set(new Uint32Array(savedSet.data));
+        else if (store.data instanceof Uint16Array) store.data.set(new Uint16Array(savedSet.data));
+        else if (store.data instanceof Uint8Array) store.data.set(new Uint8Array(savedSet.data));
+        else if (store.data instanceof Int32Array) store.data.set(new Int32Array(savedSet.data));
+        else if (store.data instanceof Int16Array) store.data.set(new Int16Array(savedSet.data));
+        else if (store.data instanceof Int8Array) store.data.set(new Int8Array(savedSet.data));
       }
     }
 
-    // 2. Checkpoint deferral resolution
-    if (this.isSaveRequested) {
-      this.isSaveRequested = false;
-      await this.saveSnapshot(); 
-    }
+    return true;
   }
 
-  private async saveSnapshot() {
-    await this.world.saveToIndexedDB(this.currentSaveSlot);
-  }
 }

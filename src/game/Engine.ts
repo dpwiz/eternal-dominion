@@ -1,6 +1,7 @@
 import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound, stringToHex } from './HexMath';
 import { GameState, Terrain, Enemy, Tech } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
+import { World, Component } from './World';
 
 export const HEX_SIZE = 26;
 export const MAP_RADIUS = 10;
@@ -65,6 +66,7 @@ export function getWaveComposition(turn: number, threatLevel: number) {
 
 export class GameEngine {
   state: GameState;
+  world: World;
   costs: Map<string, number> = new Map();
   voidCosts: Map<string, number> = new Map();
   spawnPoints: Hex[] = [];
@@ -96,6 +98,7 @@ export class GameEngine {
     this.centerTerrain = centerTerrain;
     this.borderTerrain = borderTerrain;
     this.savedImprovements = savedImprovements;
+    this.world = new World(10000);
     this.state = this.getInitialState();
     this.generateMap();
   }
@@ -345,7 +348,7 @@ export class GameEngine {
     if (this.hasTech('Pottery')) maxHp += 50;
     if (this.hasTech('Masonry')) maxHp += 50;
 
-    const cityId = Math.random().toString();
+    const cityId = this.world.createEntity();
     this.state.cities.push({
       id: cityId,
       hex,
@@ -356,6 +359,9 @@ export class GameEngine {
       timeSinceLastDamage: 0,
       size: 1
     });
+    const cityPos = hexToPixel(hex, HEX_SIZE);
+    this.world.setComponent(cityId, Component.Position, [cityPos.x, cityPos.y]);
+    this.world.setComponent(cityId, Component.Health, maxHp);
   }
 
   hasTech(id: string) { return this.state.techs.includes(id); }
@@ -385,8 +391,8 @@ export class GameEngine {
 
   assignTargets() {
     const hostiles = this.state.enemies.filter(e => !e.isConverted);
-    const hostileSlots = new Map<string, number>();
-    const onOutpost = new Map<string, boolean>();
+    const hostileSlots = new Map<number, number>();
+    const onOutpost = new Map<number, boolean>();
 
     for (const e of hostiles) {
         hostileSlots.set(e.id, 0);
@@ -394,8 +400,8 @@ export class GameEngine {
     }
 
     interface Attacker {
-        id: string; type: 'friendly'|'converted'; size: number;
-        x: number; y: number; cityId?: string; entity: any;
+        id: number; type: 'friendly'|'converted'; size: number;
+        x: number; y: number; cityId?: number; entity: any;
     }
     const attackers: Attacker[] = [];
     for (const e of this.state.enemies) if (e.isConverted) attackers.push({ id: e.id, type: 'converted', size: this.getEnemySize(e.type), x: e.x, y: e.y, entity: e });
@@ -603,8 +609,9 @@ export class GameEngine {
         // Pick a random adjacent candidate to spawn from
         const candHex = adjCandidates[Math.floor(Math.random() * adjCandidates.length)];
         const pos = hexToPixel(candHex, HEX_SIZE);
+        const engId = this.world.createEntity();
         this.state.engineers.push({
-          id: Math.random().toString(),
+          id: engId,
           x: pos.x,
           y: pos.y,
           targetHex: this.state.focusedHex,
@@ -614,6 +621,7 @@ export class GameEngine {
           offsetX: 0,
           offsetY: 0
         });
+        this.world.setComponent(engId, Component.Position, [pos.x, pos.y]);
       }
       
       for (const eng of this.state.engineers) {
@@ -709,12 +717,15 @@ export class GameEngine {
             eng.x += (dx / minDist) * speed * dt;
             eng.y += (dy / minDist) * speed * dt;
           } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
           }
         } else {
+            this.world.destroyEntity(eng.id);
             return false; // Remove engineer
         }
       }
+      this.world.setComponent(eng.id, Component.Position, [eng.x, eng.y]);
       return true; // Keep engineer
     });
   }
@@ -815,13 +826,16 @@ export class GameEngine {
 
     // XXX: Spawning reinforcements as converted scouts
     // XXX: The reinforcements are roaming, so pushed into the enemies (should just be "roaming" then) array
+    const eId = this.world.createEntity();
     this.state.enemies.push({
-      id: Math.random().toString(),
+      id: eId,
       hex: spawnHex,
       x: pos.x,
       y: pos.y,
       hp, maxHp: hp, type, speed, damage, isConverted: true, isVoidspawn
     });
+    this.world.setComponent(eId, Component.Position, [pos.x, pos.y]);
+    this.world.setComponent(eId, Component.Health, hp);
   }
 
   spawnEnemy(type: 'Scout' | 'Warrior' | 'Brute') {
@@ -865,13 +879,16 @@ export class GameEngine {
       damage *= modifier;
     }
 
+    const eId = this.world.createEntity();
     this.state.enemies.push({
-      id: Math.random().toString(),
+      id: eId,
       hex: spawnHex,
       x: pos.x,
       y: pos.y,
       hp, maxHp: hp, type, speed, damage, isConverted: false, isVoidspawn
     });
+    this.world.setComponent(eId, Component.Position, [pos.x, pos.y]);
+    this.world.setComponent(eId, Component.Health, hp);
   }
 
   validReinforcementSpawns: Hex[] = [];
@@ -1117,6 +1134,9 @@ export class GameEngine {
 
         if (dist > 0) {
           const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
+
+          // NOTE: Previously tried to stop enemies at outpost walls here, but it broke engagement ranges
+          // reverting to naive movement where enemies walk into zero-cost areas and engage directly
           enemy.x += (dx / dist) * moveDist;
           enemy.y += (dy / dist) * moveDist;
           enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
@@ -1193,8 +1213,9 @@ export class GameEngine {
       
       if (currentDefenders < targetDefenders) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
           type: 'guard',
           x: pos.x,
@@ -1205,6 +1226,8 @@ export class GameEngine {
           hp: 50,
           maxHp: 50
         });
+        this.world.setComponent(uId, Component.Position, [pos.x, pos.y]);
+        this.world.setComponent(uId, Component.Health, 50);
       }
 
       let targetCavalry = 0;
@@ -1215,8 +1238,9 @@ export class GameEngine {
       }
       if (currentCavalry < targetCavalry) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
           type: 'cavalry',
           cavalryIndex: currentCavalry,
@@ -1228,6 +1252,8 @@ export class GameEngine {
           hp: 100,
           maxHp: 100
         });
+        this.world.setComponent(uId, Component.Position, [pos.x, pos.y]);
+        this.world.setComponent(uId, Component.Health, 100);
       }
 
       let targetArchers = 0;
@@ -1238,8 +1264,9 @@ export class GameEngine {
       }
       if (currentArchers < targetArchers) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
           type: 'archer',
           archerIndex: currentArchers,
@@ -1252,6 +1279,8 @@ export class GameEngine {
           maxHp: 50,
           cooldown: 0
         });
+        this.world.setComponent(uId, Component.Position, [pos.x, pos.y]);
+        this.world.setComponent(uId, Component.Health, 50);
       }
 
       let targetMystics = 0;
@@ -1260,8 +1289,9 @@ export class GameEngine {
       }
       if (currentMystics < targetMystics) {
         const pos = hexToPixel(city.hex, HEX_SIZE);
+        const uId = this.world.createEntity();
         this.state.friendlyUnits.push({
-          id: Math.random().toString(),
+          id: uId,
           cityId: city.id,
           type: 'mystic',
           mysticIndex: currentMystics,
@@ -1274,13 +1304,15 @@ export class GameEngine {
           maxHp: 50,
           cooldown: 0
         });
+        this.world.setComponent(uId, Component.Position, [pos.x, pos.y]);
+        this.world.setComponent(uId, Component.Health, 50);
       }
     }
 
     // Update friendly units
     this.state.friendlyUnits = this.state.friendlyUnits.filter(unit => {
       const city = this.state.cities.find(c => c.id === unit.cityId);
-      if (!city) return false;
+      if (!city) { this.world.destroyEntity(unit.id); return false; }
 
       const cityPos = hexToPixel(city.hex, HEX_SIZE);
       const tile = this.state.tiles.get(hexToString(city.hex));
@@ -1306,7 +1338,7 @@ export class GameEngine {
           }
           if (farthest) {
             this.state.projectiles.push({
-              id: Math.random().toString(),
+              id: this.world.createEntity(),
               x: unit.x,
               y: unit.y,
               targetId: farthest.id,
@@ -1329,6 +1361,9 @@ export class GameEngine {
             unit.y = nextY;
         }
 
+        this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+        this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+        this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
         return true;
       }
 
@@ -1369,6 +1404,9 @@ export class GameEngine {
             unit.y = nextY;
         }
 
+        this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+        this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+        this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
         return true;
       }
 
@@ -1414,7 +1452,7 @@ export class GameEngine {
             // Target deals damage back to guard (feedback)
             unit.hp -= target.damage * 0.5 * dt;
             if (Math.random() < dt * 10) this.spawnSparks(unit.x, unit.y, isCavalry ? '#22c55e' : '#4287f5', 1);
-            if (unit.hp <= 0) return false;
+      if (unit.hp <= 0) { this.world.destroyEntity(unit.id); return false; }
           }
         }
         unit.state = 'engaging';
@@ -1498,27 +1536,36 @@ export class GameEngine {
          }
       }
 
+
+      this.world.getStore(Component.Position).set(unit.id, unit.x, 0);
+      this.world.getStore(Component.Position).set(unit.id, unit.y, 1);
+      this.world.getStore(Component.Health).set(unit.id, unit.hp, 0);
       return true;
     });
 
     // Update projectiles
     this.state.projectiles = this.state.projectiles.filter(p => {
       const target = this.state.enemies.find(e => e.id === p.targetId);
-      if (!target) return false;
+      if (!target) {
+        this.world.destroyEntity(p.id);
+        return false;
+      }
       const dx = target.x - p.x;
       const dy = target.y - p.y;
       const dist = Math.hypot(dx, dy);
       if (dist < 5) {
         target.hp -= p.damage;
         this.spawnSparks(target.x, target.y, target.type === 'Brute' ? '#8b0000' : '#ff0000', 5);
+        this.world.destroyEntity(p.id);
         return false;
       }
       p.x += (dx / dist) * p.speed * dt;
       p.y += (dy / dist) * p.speed * dt;
+
       return true;
     });
 
-    const cityPatrolDamage = new Map<string, number>();
+    const cityPatrolDamage = new Map<number, number>();
     for (const city of this.state.cities) { cityPatrolDamage.set(city.id, 0); }
     for (const unit of this.state.friendlyUnits) {
       if (unit.state === 'idle' || unit.state === 'healing') {
@@ -1562,13 +1609,22 @@ export class GameEngine {
         this.state.xp += xpGain;
         this.state.stats.cumulativeXp += xpGain;
         this.state.stats.threatsKilled++;
+        this.world.destroyEntity(e.id);
         return false;
       }
+
+      this.world.getStore(Component.Position).set(e.id, e.x, 0);
+      this.world.getStore(Component.Position).set(e.id, e.y, 1);
+      this.world.getStore(Component.Health).set(e.id, e.hp, 0);
       return true;
     });
 
     const initialCities = this.state.cities.length;
-    this.state.cities = this.state.cities.filter(c => c.hp > 0);
+    this.state.cities = this.state.cities.filter(c => {
+        if (c.hp <= 0) { this.world.destroyEntity(c.id); return false; }
+        this.world.getStore(Component.Health).set(c.id, c.hp, 0);
+        return true;
+    });
     if (this.state.cities.length < initialCities) {
       this.state.stats.citiesLost += (initialCities - this.state.cities.length);
       for (const tile of this.state.tiles.values()) {
@@ -1675,6 +1731,7 @@ export class GameEngine {
 
   instaWin() {
     this.state.phase = 'VICTORY';
+    for (const e of this.state.enemies) this.world.destroyEntity(e.id);
     this.state.enemies = [];
     this.notify(true);
   }

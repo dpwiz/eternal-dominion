@@ -1,6 +1,7 @@
 import { GameState, Terrain } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
 import { HEX_SIZE, MAP_RADIUS } from './Engine';
+import { World, Component } from './World';
 
 export class Renderer {
   ctx: CanvasRenderingContext2D;
@@ -23,7 +24,7 @@ export class Renderer {
     this.camera.y = this.height / 2 + HEX_SIZE * Math.sqrt(3);
   }
 
-  draw(state: GameState) {
+  draw(state: GameState, world: World) {
     this.ctx.clearRect(0, 0, this.width, this.height);
     this.ctx.save();
     this.ctx.translate(this.camera.x, this.camera.y);
@@ -175,7 +176,14 @@ export class Renderer {
       }
       const radius = unitSize <= 1 ? 4 : (unitSize === 2 ? 6 : 8);
       
-      this.ctx.arc(unit.x, unit.y, radius, 0, Math.PI * 2);
+      let renderX = unit.x;
+      let renderY = unit.y;
+      if (world.getStore(Component.Position).has(unit.id)) {
+          renderX = world.getStore(Component.Position).get(unit.id, 0);
+          renderY = world.getStore(Component.Position).get(unit.id, 1);
+      }
+
+      this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
 
       let fillColor = '#4287f5'; // guard
       if (unit.type === 'cavalry') fillColor = '#22c55e';
@@ -190,7 +198,7 @@ export class Renderer {
 
       if (unit.hp < unit.maxHp) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(unit.x - radius, unit.y - radius - 4, radius * 2 * (unit.hp / unit.maxHp), 2);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (unit.hp / unit.maxHp), 2);
       }
     }
 
@@ -233,7 +241,14 @@ export class Renderer {
       const size = enemy.type === 'Scout' ? 1 : (enemy.type === 'Warrior' ? 2 : 3);
       const radius = size === 1 ? 4 : (size === 2 ? 6 : 8);
 
-      this.ctx.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+      let renderX = enemy.x;
+      let renderY = enemy.y;
+      if (world.getStore(Component.Position).has(enemy.id)) {
+          renderX = world.getStore(Component.Position).get(enemy.id, 0);
+          renderY = world.getStore(Component.Position).get(enemy.id, 1);
+      }
+
+      this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
       
       let baseColor = enemy.isConverted ? '#38bdf8' : (enemy.type === 'Brute' ? '#8b0000' : enemy.type === 'Warrior' ? '#ff4500' : '#ff8c00');
       let strokeColor = enemy.isConverted ? '#0284c7' : '#000';
@@ -255,13 +270,19 @@ export class Renderer {
 
       if (enemy.hp < enemy.maxHp) {
         this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
-        this.ctx.fillRect(enemy.x - radius, enemy.y - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 3);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (enemy.hp / enemy.maxHp), 2);
       }
     }
 
     for (const eng of state.engineers) {
       this.ctx.beginPath();
-      this.ctx.arc(eng.x, eng.y, 4, 0, Math.PI * 2);
+      let renderX = eng.x;
+      let renderY = eng.y;
+      if (world.getStore(Component.Position).has(eng.id)) {
+          renderX = world.getStore(Component.Position).get(eng.id, 0);
+          renderY = world.getStore(Component.Position).get(eng.id, 1);
+      }
+      this.ctx.arc(renderX, renderY, 4, 0, Math.PI * 2);
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fill();
       this.ctx.strokeStyle = '#000000';
