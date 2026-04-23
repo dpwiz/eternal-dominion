@@ -1134,9 +1134,17 @@ export class GameEngine {
 
         if (dist > 0) {
           const moveDist = Math.min(dist, actualSpeed * HEX_SIZE * dt);
-          enemy.x += (dx / dist) * moveDist;
-          enemy.y += (dy / dist) * moveDist;
-          enemy.hex = pixelToHex(enemy.x, enemy.y, HEX_SIZE);
+          const nextX = enemy.x + (dx / dist) * moveDist;
+          const nextY = enemy.y + (dy / dist) * moveDist;
+          const nextHex = pixelToHex(nextX, nextY, HEX_SIZE);
+
+          if (!enemy.isConverted && this.costs.get(hexToString(nextHex)) === 0 && hexToString(nextHex) !== hexToString(enemy.hex)) {
+             // Stop at outpost edge
+          } else {
+             enemy.x = nextX;
+             enemy.y = nextY;
+             enemy.hex = nextHex;
+          }
         }
       }
       
