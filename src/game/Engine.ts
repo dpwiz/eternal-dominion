@@ -1,7 +1,7 @@
 import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, hexRound, stringToHex } from './HexMath';
 import { GameState, Terrain, Enemy, Tech } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
-import { World } from './World';
+import { World, Component } from './World';
 
 export const HEX_SIZE = 26;
 export const MAP_RADIUS = 10;
@@ -360,10 +360,10 @@ export class GameEngine {
       size: 1
     });
     const cityPos = hexToPixel(hex, HEX_SIZE);
-    this.world.addComponent(cityId, 0 /* Position */);
+    this.world.addComponent(cityId, Component.Position);
     this.world.positions[cityId * 2] = cityPos.x;
     this.world.positions[cityId * 2 + 1] = cityPos.y;
-    this.world.addComponent(cityId, 2 /* Health */);
+    this.world.addComponent(cityId, Component.Health);
     this.world.healths[cityId] = maxHp;
   }
 
@@ -624,7 +624,7 @@ export class GameEngine {
           offsetX: 0,
           offsetY: 0
         });
-        this.world.addComponent(engId, 0 /* Position */);
+        this.world.addComponent(engId, Component.Position);
         this.world.positions[engId * 2] = pos.x;
         this.world.positions[engId * 2 + 1] = pos.y;
       }
@@ -836,10 +836,10 @@ export class GameEngine {
       y: pos.y,
       hp, maxHp: hp, type, speed, damage, isConverted: true, isVoidspawn
     });
-    this.world.addComponent(eId, 0 /* Position */);
+    this.world.addComponent(eId, Component.Position);
     this.world.positions[eId * 2] = pos.x;
     this.world.positions[eId * 2 + 1] = pos.y;
-    this.world.addComponent(eId, 2 /* Health */);
+    this.world.addComponent(eId, Component.Health);
     this.world.healths[eId] = hp;
   }
 
@@ -892,10 +892,10 @@ export class GameEngine {
       y: pos.y,
       hp, maxHp: hp, type, speed, damage, isConverted: false, isVoidspawn
     });
-    this.world.addComponent(eId, 0 /* Position */);
+    this.world.addComponent(eId, Component.Position);
     this.world.positions[eId * 2] = pos.x;
     this.world.positions[eId * 2 + 1] = pos.y;
-    this.world.addComponent(eId, 2 /* Health */);
+    this.world.addComponent(eId, Component.Health);
     this.world.healths[eId] = hp;
   }
 
@@ -1231,10 +1231,10 @@ export class GameEngine {
           hp: 50,
           maxHp: 50
         });
-        this.world.addComponent(uId, 0 /* Position */);
+        this.world.addComponent(uId, Component.Position);
         this.world.positions[uId * 2] = pos.x;
         this.world.positions[uId * 2 + 1] = pos.y;
-        this.world.addComponent(uId, 2 /* Health */);
+        this.world.addComponent(uId, Component.Health);
         this.world.healths[uId] = 50;
       }
 
@@ -1260,10 +1260,10 @@ export class GameEngine {
           hp: 100,
           maxHp: 100
         });
-        this.world.addComponent(uId, 0 /* Position */);
+        this.world.addComponent(uId, Component.Position);
         this.world.positions[uId * 2] = pos.x;
         this.world.positions[uId * 2 + 1] = pos.y;
-        this.world.addComponent(uId, 2 /* Health */);
+        this.world.addComponent(uId, Component.Health);
         this.world.healths[uId] = 100;
       }
 
@@ -1290,10 +1290,10 @@ export class GameEngine {
           maxHp: 50,
           cooldown: 0
         });
-        this.world.addComponent(uId, 0 /* Position */);
+        this.world.addComponent(uId, Component.Position);
         this.world.positions[uId * 2] = pos.x;
         this.world.positions[uId * 2 + 1] = pos.y;
-        this.world.addComponent(uId, 2 /* Health */);
+        this.world.addComponent(uId, Component.Health);
         this.world.healths[uId] = 50;
       }
 
@@ -1318,10 +1318,10 @@ export class GameEngine {
           maxHp: 50,
           cooldown: 0
         });
-        this.world.addComponent(uId, 0 /* Position */);
+        this.world.addComponent(uId, Component.Position);
         this.world.positions[uId * 2] = pos.x;
         this.world.positions[uId * 2 + 1] = pos.y;
-        this.world.addComponent(uId, 2 /* Health */);
+        this.world.addComponent(uId, Component.Health);
         this.world.healths[uId] = 50;
       }
     }

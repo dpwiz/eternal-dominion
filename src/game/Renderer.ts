@@ -1,7 +1,7 @@
 import { GameState, Terrain } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
 import { HEX_SIZE, MAP_RADIUS } from './Engine';
-import { World } from './World';
+import { World, Component } from './World';
 
 export class Renderer {
   ctx: CanvasRenderingContext2D;
@@ -178,7 +178,7 @@ export class Renderer {
       
       let renderX = unit.x;
       let renderY = unit.y;
-      if (world && world.getComponentSet(0 /* Position */).has(unit.id)) {
+      if (world && world.getComponentSet(Component.Position).has(unit.id)) {
           renderX = world.positions[unit.id * 2];
           renderY = world.positions[unit.id * 2 + 1];
       }
@@ -243,7 +243,7 @@ export class Renderer {
 
       let renderX = enemy.x;
       let renderY = enemy.y;
-      if (world && world.getComponentSet(0 /* Position */).has(enemy.id)) {
+      if (world && world.getComponentSet(Component.Position).has(enemy.id)) {
           renderX = world.positions[enemy.id * 2];
           renderY = world.positions[enemy.id * 2 + 1];
       }
@@ -278,7 +278,7 @@ export class Renderer {
       this.ctx.beginPath();
       let renderX = eng.x;
       let renderY = eng.y;
-      if (world && world.getComponentSet(0 /* Position */).has(eng.id)) {
+      if (world && world.getComponentSet(Component.Position).has(eng.id)) {
           renderX = world.positions[eng.id * 2];
           renderY = world.positions[eng.id * 2 + 1];
       }
