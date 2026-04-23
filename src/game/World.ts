@@ -96,6 +96,30 @@ export class World implements IWorld {
     return this.componentSets[comp];
   }
 
+  setComponent(entity: number, comp: Component, value: any) {
+    this.addComponent(entity, comp);
+    switch (comp) {
+      case Component.Position:
+        this.positions[entity * 2] = value[0];
+        this.positions[entity * 2 + 1] = value[1];
+        break;
+      case Component.Velocity:
+        this.velocities[entity * 2] = value[0];
+        this.velocities[entity * 2 + 1] = value[1];
+        break;
+      case Component.Health:
+        this.healths[entity] = value;
+        break;
+      case Component.UnitType:
+        this.unitTypes[entity] = value;
+        break;
+      case Component.UnitState:
+        this.unitStates[entity] = value;
+        break;
+    }
+  }
+
+
   // --- Persistence ---
 
   async saveToIndexedDB(slotId: string) {
