@@ -9,9 +9,8 @@ export enum Component {
   Health = 2,
   UnitType = 3,
   UnitState = 4,
+  MAX_COMPONENTS,
 }
-
-const MAX_COMPONENTS = 5;
 
 export interface WorldSave {
   id: string;
@@ -52,7 +51,7 @@ export class World implements IWorld {
 
     // Initialize exactly one SparseSet per component type
     this.componentSets = Array.from(
-      { length: MAX_COMPONENTS },
+      { length: Component.MAX_COMPONENTS },
       () => new SparseSet(maxEntities)
     );
 
@@ -77,7 +76,7 @@ export class World implements IWorld {
 
   destroyEntity(entity: number) {
     // Remove entity from all component sets so systems ignore it
-    for (let i = 0; i < MAX_COMPONENTS; i++) {
+    for (let i = 0; i < Component.MAX_COMPONENTS; i++) {
       this.componentSets[i].remove(entity);
     }
     this.freeIds.push(entity);
@@ -149,7 +148,7 @@ export class World implements IWorld {
     world.unitStates.set(new Uint8Array(saveState.unitStatesBuffer));
 
     // Restore Sparse Sets
-    for (let i = 0; i < MAX_COMPONENTS; i++) {
+    for (let i = 0; i < Component.MAX_COMPONENTS; i++) {
       const savedSet = saveState.sparseSetsData[i];
       world.componentSets[i].count = savedSet.count;
       world.componentSets[i].dense.set(new Int32Array(savedSet.dense));
