@@ -179,8 +179,8 @@ export class Renderer {
       let renderX = unit.x;
       let renderY = unit.y;
       if (world.getComponentSet(Component.Position).has(unit.id)) {
-          renderX = world.positions[unit.id * 2];
-          renderY = world.positions[unit.id * 2 + 1];
+          renderX = world.getComponentSet(Component.Position).get(unit.id, 0);
+          renderY = world.getComponentSet(Component.Position).get(unit.id, 1);
       }
 
       this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
@@ -244,8 +244,8 @@ export class Renderer {
       let renderX = enemy.x;
       let renderY = enemy.y;
       if (world.getComponentSet(Component.Position).has(enemy.id)) {
-          renderX = world.positions[enemy.id * 2];
-          renderY = world.positions[enemy.id * 2 + 1];
+          renderX = world.getComponentSet(Component.Position).get(enemy.id, 0);
+          renderY = world.getComponentSet(Component.Position).get(enemy.id, 1);
       }
 
       this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
@@ -279,8 +279,8 @@ export class Renderer {
       let renderX = eng.x;
       let renderY = eng.y;
       if (world.getComponentSet(Component.Position).has(eng.id)) {
-          renderX = world.positions[eng.id * 2];
-          renderY = world.positions[eng.id * 2 + 1];
+          renderX = world.getComponentSet(Component.Position).get(eng.id, 0);
+          renderY = world.getComponentSet(Component.Position).get(eng.id, 1);
       }
       this.ctx.arc(renderX, renderY, 4, 0, Math.PI * 2);
       this.ctx.fillStyle = '#ffffff';
