@@ -1,5 +1,5 @@
 import React from 'react';
-import { GameState, Terrain } from '../game/Types';
+import { GameState, Terrain, FriendlyType } from '../game/Types';
 import { ALL_TECHS, FUSIONS } from '../game/Content';
 import { getWaveComposition } from '../game/Engine';
 import { hexToString } from '../game/HexMath';
@@ -153,23 +153,27 @@ export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPic
             <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Outposts: {state.cities.length}</h3>
             <div className="flex flex-col gap-2">
               {sortedCities.map((city, index) => {
-                const tile = state.tiles.get(hexToString(city.hex));
+                const sHexPosition = world.getStore(Component.HexPosition);
+                const q = sHexPosition.get(city.id, 0);
+                const r = sHexPosition.get(city.id, 1);
+                const tile = state.tiles.get(hexToString({q, r, s: -q-r}));
                 const terrainName = getTerrainName(tile?.terrain);
                 const terrainColor = getTerrainColor(tile?.terrain);
-                const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && u.type === 'guard').length;
+                const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && world.getStore(Component.FriendlyType).get(u.id, 0) === FriendlyType.Guard).length;
                 const maxDefenders = Math.min(6, city.size);
                 const cityHp = world.getStore(Component.Health).get(city.id, 0);
+                const cityMaxHp = world.getStore(Component.MaxHealth).get(city.id, 0);
                 return (
                   <div key={city.id} className="flex flex-col text-sm">
                     <div className="flex justify-between items-center text-slate-400 text-xs mt-1">
-                      <span>HP: {Math.floor(cityHp)}/{city.maxHp}</span>
-                      <span className={`font-medium px-2 ${terrainColor}`}>{terrainName}</span>
+                      <span>HP: {Math.floor(cityHp)}/{Math.floor(cityMaxHp)}</span>
+                      <span className={`font-medium px-2 ${terrainColor}`}>{terrainName} ({q},{r})</span>
                       <span>Guards: {defenders}/{maxDefenders}</span>
                     </div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-1 overflow-hidden">
                       <div 
                         className="bg-red-500 h-full transition-all duration-200" 
-                        style={{ width: `${(cityHp / city.maxHp) * 100}%` }}
+                        style={{ width: `${(cityHp / cityMaxHp) * 100}%` }}
                       />
                     </div>
                   </div>

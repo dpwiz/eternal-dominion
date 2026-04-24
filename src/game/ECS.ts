@@ -9,51 +9,56 @@ export interface TypedArrayConstructor<T extends TypedArray> {
 }
 
 export class SparseStore<T extends TypedArray> {
-  public dense: Int32Array;
+  public dense: Float64Array;
   public sparse: Int32Array;
   public count: number = 0;
 
   public data: T;
   public readonly stride: number;
+  private readonly _capacity: number;
 
   constructor(capacity: number, ArrayType: TypedArrayConstructor<T>, stride: number = 1) {
-    this.dense = new Int32Array(capacity);
+    this._capacity = capacity;
+    this.dense = new Float64Array(capacity);
     this.sparse = new Int32Array(capacity).fill(-1);
     this.data = new ArrayType(capacity * stride);
     this.stride = stride;
   }
 
   add(entity: number) {
-    if (this.sparse[entity] === -1) {
+    const idx = entity % this._capacity;
+    if (this.sparse[idx] === -1) {
       this.dense[this.count] = entity;
-      this.sparse[entity] = this.count;
+      this.sparse[idx] = this.count;
       this.count++;
     }
   }
 
   remove(entity: number) {
-    if (this.sparse[entity] !== -1) {
-      const indexToRemove = this.sparse[entity];
+    const idx = entity % this._capacity;
+    if (this.sparse[idx] !== -1 && this.dense[this.sparse[idx]] === entity) {
+      const indexToRemove = this.sparse[idx];
       const lastEntity = this.dense[this.count - 1];
 
       this.dense[indexToRemove] = lastEntity;
-      this.sparse[lastEntity] = indexToRemove;
+      this.sparse[lastEntity % this._capacity] = indexToRemove;
 
-      this.sparse[entity] = -1;
+      this.sparse[idx] = -1;
       this.count--;
     }
   }
 
   has(entity: number): boolean {
-    return this.sparse[entity] !== -1;
+    const idx = entity % this._capacity;
+    return this.sparse[idx] !== -1 && this.dense[this.sparse[idx]] === entity;
   }
 
   get(entity: number, element: number = 0): number {
-    return this.data[entity * this.stride + element];
+    return this.data[(entity % this._capacity) * this.stride + element];
   }
 
   set(entity: number, value: number, element: number = 0): void {
-    this.data[entity * this.stride + element] = value;
+    this.data[(entity % this._capacity) * this.stride + element] = value;
   }
 }
 
@@ -61,28 +66,33 @@ export abstract class GenericWorld<C extends number> {
   public readonly capacity: number;
   public nextEntityId: number = 0;
   public freeIds: number[] = [];
+  public generations: Uint32Array;
 
   protected stores: SparseStore<TypedArray>[];
 
   constructor(capacity: number, maxComponents: number) {
     this.capacity = capacity;
     this.stores = new Array(maxComponents);
+    this.generations = new Uint32Array(capacity).fill(1);
   }
 
   createEntity(): number {
-    const id = this.freeIds.length > 0
+    const idx = this.freeIds.length > 0
       ? this.freeIds.pop()!
       : this.nextEntityId++;
 
-    if (id >= this.capacity) throw new Error("World capacity reached!");
-    return id;
+    if (idx >= this.capacity) throw new Error("World capacity reached!");
+    const gen = this.generations[idx];
+    return idx + gen * this.capacity;
   }
 
   destroyEntity(entity: number) {
+    const idx = entity % this.capacity;
     for (const store of this.stores) {
       if (store) store.remove(entity);
     }
-    this.freeIds.push(entity);
+    this.generations[idx]++;
+    this.freeIds.push(idx);
   }
 
   addComponent(entity: number, comp: C) {
@@ -114,6 +124,7 @@ export abstract class GenericWorld<C extends number> {
       capacity: this.capacity,
       nextEntityId: this.nextEntityId,
       freeIds: [...this.freeIds],
+      generations: this.generations.slice().buffer,
       sparseSetsData,
     };
 
@@ -136,12 +147,21 @@ export abstract class GenericWorld<C extends number> {
 
     this.nextEntityId = saveState.nextEntityId;
     this.freeIds = saveState.freeIds;
+    if (saveState.generations) {
+        this.generations = new Uint32Array(saveState.generations);
+    } else {
+        this.generations = new Uint32Array(this.capacity).fill(1);
+    }
 
     for (const savedSet of saveState.sparseSetsData) {
       const store = this.getStore(savedSet.comp);
       if (store) {
         store.count = savedSet.count;
-        store.dense.set(new Int32Array(savedSet.dense));
+        if (savedSet.dense.byteLength === this.capacity * 4) {
+          store.dense.set(new Int32Array(savedSet.dense));
+        } else {
+          store.dense.set(new Float64Array(savedSet.dense));
+        }
         store.sparse.set(new Int32Array(savedSet.sparse));
 
                 if (store.data instanceof Float64Array) store.data.set(new Float64Array(savedSet.data));

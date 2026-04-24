@@ -15,6 +15,9 @@ export enum Component {
   Speed, // f32
   Damage, // f32
   TargetId, // u32
+  HexPosition, // i16 x2
+  HomeHex, // i16 x2
+  TargetHex, // i16 x2
   MAX_COMPONENTS,
 }
 
@@ -42,6 +45,9 @@ export class World extends GenericWorld<Component> {
     this.stores[Component.Speed] = new SparseStore(maxEntities, Float32Array, 1);
     this.stores[Component.Damage] = new SparseStore(maxEntities, Float32Array, 1);
     this.stores[Component.TargetId] = new SparseStore(maxEntities, Uint32Array, 1);
+    this.stores[Component.HexPosition] = new SparseStore(maxEntities, Int16Array, 2);
+    this.stores[Component.HomeHex] = new SparseStore(maxEntities, Int16Array, 2);
+    this.stores[Component.TargetHex] = new SparseStore(maxEntities, Int16Array, 2);
   }
 
   setComponent(entity: number, comp: Component, value: any) {
@@ -62,6 +68,9 @@ export class World extends GenericWorld<Component> {
         break;
       // 2-element components
       case Component.Position:
+      case Component.HexPosition:
+      case Component.HomeHex:
+      case Component.TargetHex:
         store.set(entity, value[0], 0);
         store.set(entity, value[1], 1);
         break;

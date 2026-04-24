@@ -1,6 +1,7 @@
-import { Hex, hexToString, hexNeighbor, hexDistance } from './HexMath';
+import { Hex, hexToString, hexDistance } from './HexMath';
 import { Terrain } from './Types';
 import { PRNG } from './Random';
+import { get, set, del } from 'idb-keyval';
 
 export type CampaignTileStatus = 'CLEARED' | 'CLAIMABLE' | 'SHROUDED' | 'HIDDEN';
 
@@ -18,15 +19,45 @@ export class CampaignEngine {
   globalLevel: number = 1;
   proficiencies: Record<string, number> = {};
 
-  constructor(seed: number = 42) {
-    if (this.load()) {
-      return;
-    }
+  static CURRENT_VERSION = 2;
 
+  static async checkVersionMismatch(): Promise<{ mismatch: boolean; expected: number; found: number | undefined }> {
+    let saved: any = await get('campaign_save');
+    if (!saved) {
+       const localSaved = localStorage.getItem('campaign_save');
+       if (localSaved) {
+           try { saved = JSON.parse(localSaved); } catch (e) {}
+       }
+    }
+    
+    if (saved) {
+      if (Array.isArray(saved)) {
+         return { mismatch: true, expected: CampaignEngine.CURRENT_VERSION, found: 0 }; // Legacy array format
+      } else if (saved.version !== CampaignEngine.CURRENT_VERSION) {
+         return { mismatch: true, expected: CampaignEngine.CURRENT_VERSION, found: saved.version };
+      }
+    }
+    
+    return { mismatch: false, expected: CampaignEngine.CURRENT_VERSION, found: undefined };
+  }
+
+  static async create(seed: number = 42): Promise<CampaignEngine> {
+    const engine = new CampaignEngine();
+    if (await engine.load()) {
+      return engine;
+    }
+    engine.generate(seed);
+    return engine;
+  }
+
+  constructor() {}
+
+  generate(seed: number) {
     const rng = new PRNG(seed);
     const radius = 6; // up to 6 hexes out (127 tiles)
     for (let q = -radius; q <= radius; q++) {
       for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+
         const hex = { q, r, s: -q - r };
         const dist = hexDistance({q:0, r:0, s:0}, hex);
         
@@ -83,7 +114,7 @@ export class CampaignEngine {
         }
       }
     }
-    this.save();
+    this.save().catch(console.error);
   }
 
   updateStatuses() {
@@ -118,22 +149,37 @@ export class CampaignEngine {
     }
   }
 
-  save() {
+  async save() {
     const data = {
+      version: CampaignEngine.CURRENT_VERSION, // Data layout version
       tiles: Array.from(this.tiles.entries()),
       days: this.days,
       globalXp: this.globalXp,
       globalLevel: this.globalLevel,
       proficiencies: this.proficiencies
     };
-    localStorage.setItem('campaign_save', JSON.stringify(data));
+    await set('campaign_save', data);
   }
 
-  load(): boolean {
-    const saved = localStorage.getItem('campaign_save');
+  async load(): Promise<boolean> {
+    let saved = await get('campaign_save');
+    if (!saved) {
+       // Migrate from localStorage
+       const localSaved = localStorage.getItem('campaign_save');
+       if (localSaved) {
+          try {
+             saved = JSON.parse(localSaved);
+             localStorage.removeItem('campaign_save');
+             await set('campaign_save', saved);
+          } catch (e) {
+             console.error('Failed to parse local storage campaign_save', e);
+          }
+       }
+    }
+
     if (saved) {
       try {
-        const data = JSON.parse(saved);
+        const data = saved;
         if (Array.isArray(data)) {
             // legacy save migration
             this.tiles = new Map(data);
@@ -148,6 +194,15 @@ export class CampaignEngine {
             this.globalLevel = data.globalLevel || 1;
             this.proficiencies = data.proficiencies || {};
         }
+
+        // Migrate older saves that are missing `hex` in the tile object
+        for (const [key, tile] of this.tiles.entries()) {
+           if (!tile.hex) {
+               const [q, r] = key.split(',').map(Number);
+               tile.hex = { q, r, s: -q - r };
+           }
+        }
+
         return true;
       } catch (e) {
         console.error('Failed to load campaign save', e);

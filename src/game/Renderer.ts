@@ -1,4 +1,5 @@
-import { GameState, Terrain, MobUnit, FriendlyType, FriendlyState, EngineerState } from './Types';
+import { getHex } from './Engine';
+import { GameState, Terrain, MobUnit, FriendlyType } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
 import { HEX_SIZE, MAP_RADIUS } from './Engine';
 import { World, Component } from './World';
@@ -27,9 +28,11 @@ export class Renderer {
   draw(state: GameState, world: World) {
     const sPosition = world.getStore(Component.Position);
     const sHealth = world.getStore(Component.Health);
+    const sMaxHealth = world.getStore(Component.MaxHealth);
+
     const sMobType = world.getStore(Component.MobType);
     const sFriendlyType = world.getStore(Component.FriendlyType);
-
+    const sHexPosition = world.getStore(Component.HexPosition);
 
     this.ctx.clearRect(0, 0, this.width, this.height);
     this.ctx.save();
@@ -44,7 +47,7 @@ export class Renderer {
       if (tile.terrain === Terrain.Mountains) color = '#7a7a7a';
       if (tile.terrain === Terrain.Void) color = '#0f0e24'; // Extremely deep dark void
 
-      const isPlayArea = Math.max(Math.abs(tile.hex.q), Math.abs(tile.hex.r), Math.abs(tile.hex.s)) <= MAP_RADIUS;
+      const isPlayArea = Math.max(Math.abs((tile.hex || {q:0}).q), Math.abs((tile.hex || {r:0}).r), Math.abs((tile.hex || {s:0}).s)) <= MAP_RADIUS;
 
       if (isPlayArea) {
         let drawColor = color;
@@ -80,7 +83,7 @@ export class Renderer {
         this.ctx.stroke();
       }
 
-      if (state.focusedHex === hexToString(tile.hex)) {
+      if (state.focusedHex && hexToString(state.focusedHex) === hexToString(tile.hex)) {
         this.ctx.beginPath();
         this.drawHexPath(pos.x, pos.y, HEX_SIZE - 2);
         this.ctx.strokeStyle = '#fbbf24'; // amber-400
@@ -118,14 +121,14 @@ export class Renderer {
     }
 
     for (const city of state.cities) {
-      const tile = state.tiles.get(hexToString(city.hex));
-      const pos = hexToPixel(city.hex, HEX_SIZE);
+      const tile = state.tiles.get(hexToString(getHex(sHexPosition, city.id)!));
+      const pos = hexToPixel(getHex(sHexPosition, city.id)!, HEX_SIZE);
       this.drawHex(pos.x, pos.y, HEX_SIZE, '#ffffff');
 
       const city_hp = sHealth.get(city.id);
-      if (city_hp < city.maxHp) {
+      if (city_hp < sMaxHealth.get(city.id, 0)) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city_hp / city.maxHp), 4);
+        this.ctx.fillRect(pos.x - HEX_SIZE / 2, pos.y - HEX_SIZE * 0.75, HEX_SIZE * (city_hp / sMaxHealth.get(city.id, 0)), 4);
       }
 
       if (tile) {
@@ -161,8 +164,6 @@ export class Renderer {
          this.ctx.stroke();
       }
     }
-
-    const hasWarChariots = state.fusions.includes('WarChariots');
 
     // Draw friendly units
     for (const unit of state.friendlyUnits) {
@@ -204,9 +205,9 @@ export class Renderer {
       this.ctx.stroke();
 
       const unit_hp = sHealth.get(unit.id);
-      if (unit_hp < unit.maxHp) {
+      if (unit_hp < sMaxHealth.get(unit.id, 0)) {
         this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (unit_hp / unit.maxHp), 2);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (unit_hp / sMaxHealth.get(unit.id, 0)), 2);
       }
     }
 
@@ -277,9 +278,9 @@ export class Renderer {
       this.ctx.lineWidth = 1;
 
       const enemy_hp = sHealth.get(enemy.id);
-      if (enemy_hp < enemy.maxHp) {
+      if (enemy_hp < sMaxHealth.get(enemy.id, 0)) {
         this.ctx.fillStyle = enemy.isConverted ? '#22c55e' : '#ff0000';
-        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (enemy_hp / enemy.maxHp), 2);
+        this.ctx.fillRect(renderX - radius, renderY - radius - 4, radius * 2 * (enemy_hp / sMaxHealth.get(enemy.id, 0)), 2);
       }
     }
 

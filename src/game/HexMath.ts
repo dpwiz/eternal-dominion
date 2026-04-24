@@ -1,30 +1,40 @@
 export type Hex = { q: number; r: number; s: number };
 
-export const hexAdd = (a: Hex, b: Hex): Hex => ({ q: a.q + b.q, r: a.r + b.r, s: a.s + b.s });
+export const hexAdd = (a: Hex, b: Hex): Hex => {
+  if (!a || !b) return {q:0, r:0, s:0};
+  return { q: a.q + b.q, r: a.r + b.r, s: a.s + b.s };
+};
 
-export const hexDistance = (a: Hex, b: Hex): number => 
-  (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.s - b.s)) / 2;
+export const hexDistance = (a: Hex, b: Hex): number => {
+  if (!a || !b) return 999;
+  return (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.s - b.s)) / 2;
+}
 
 export const hexDirections = [
   { q: 1, r: 0, s: -1 }, { q: 1, r: -1, s: 0 }, { q: 0, r: -1, s: 1 },
   { q: -1, r: 0, s: 1 }, { q: -1, r: 1, s: 0 }, { q: 0, r: 1, s: -1 }
 ];
 
-export const hexNeighbor = (hex: Hex, dir: number): Hex => hexAdd(hex, hexDirections[dir]);
+export const hexNeighbor = (hex: Hex, dir: number): Hex => {
+  if (!hex) { console.trace("hexNeighbor null hex"); return {q:0, r:0, s:0}; }
+  return hexAdd(hex, hexDirections[dir]);
+};
 
 export const hexToPixel = (hex: Hex, size: number): { x: number; y: number } => {
+  if (!hex) { console.trace("hexToPixel empty hex"); return {x:0, y:0}; }
   const x = size * (Math.sqrt(3) * hex.q + Math.sqrt(3) / 2 * hex.r);
   const y = size * (3 / 2 * hex.r);
   return { x, y };
 };
 
-export const pixelToHex = (x: number, y: number, size: number): Hex => {
+export const pixelToHex = (x: number = 0, y: number = 0, size: number = 1): Hex => {
   const q = (Math.sqrt(3) / 3 * x - 1 / 3 * y) / size;
   const r = (2 / 3 * y) / size;
   return hexRound({ q, r, s: -q - r });
 };
 
 export const hexRound = (hex: Hex): Hex => {
+  if (!hex) { console.trace("hexRound empty hex"); return {q:0, r:0, s:0}; }
   let q = Math.round(hex.q);
   let r = Math.round(hex.r);
   let s = Math.round(hex.s);
@@ -37,9 +47,13 @@ export const hexRound = (hex: Hex): Hex => {
   return { q, r, s };
 };
 
-export const hexToString = (hex: Hex): string => `${hex.q === -0 ? 0 : hex.q},${hex.r === -0 ? 0 : hex.r}`;
+export const hexToString = (hex: Hex): string => {
+  if (!hex) { return '0,0'; }
+  return `${hex.q === -0 ? 0 : hex.q},${hex.r === -0 ? 0 : hex.r}`;
+};
 
 export const stringToHex = (str: string): Hex => {
+  if (!str) return { q: 0, r: 0, s: 0 };
   const [q, r] = str.split(',').map(Number);
   return { q, r, s: -q - r };
 };

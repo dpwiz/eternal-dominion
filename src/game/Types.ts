@@ -11,8 +11,6 @@ export enum EngineerState { MovingToWork, Working, Returning }
 
 export interface City {
   id: number;
-  hex: Hex;
-  maxHp: number;
   archeryCooldown: number;
   mysticismCooldown: number;
   timeSinceLastDamage: number;
@@ -21,10 +19,6 @@ export interface City {
 
 export interface Enemy {
   id: number;
-  hex: Hex;
-  maxHp: number;
-  speed: number;
-  damage: number;
   isConverted: boolean;
   isVoidspawn?: boolean;
   targetId?: number;
@@ -32,8 +26,6 @@ export interface Enemy {
 
 export interface Engineer {
   id: number;
-  targetHex: string | null;
-  homeCityHex: Hex | null;
   workTimer: number;
   offsetX: number;
   offsetY: number;
@@ -47,7 +39,6 @@ export interface FriendlyUnit {
   mysticIndex?: number;
   targetId: number | null;
   angle: number;
-  maxHp: number;
   cooldown?: number;
 }
 
@@ -56,8 +47,6 @@ export interface FriendlyUnit {
 export interface Projectile {
   id: number;
   targetId: number;
-  damage: number;
-  speed: number;
 }
 
 export interface Particle {
@@ -104,7 +93,7 @@ export interface GameState {
   level: number;
   xpToNext: number;
   phase: 'START' | 'PLAYING' | 'LEVEL_UP' | 'GAME_OVER' | 'VICTORY';
-  focusedHex: string | null;
+  focusedHex: Hex | null;
   pendingTechPicks: Tech[][];
   stats: {
     threatsKilled: number;

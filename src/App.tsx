@@ -24,8 +24,11 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
        const tileStr = hexToString(hex);
        const tile = engine.state.tiles.get(tileStr);
 
+       const centerT = Terrain[engine.centerTerrain];
+       const borderT = engine.borderTerrain.map(t => t == null ? '--' : Terrain[t]);
+
        if (tile) {
-         const weightsMap = engine.getTerrainBlend(hex.q, hex.r, hex.s, hexDirections);
+         const weightsMap = engine.getTerrainBlend(hex?.q || 0, hex?.r || 0, hex?.s || 0, hexDirections);
          const weights: {name: string, w: number}[] = [];
          let pM = 0, pH = 0, pF = 0, pP = 0;
          for (const [t, w] of weightsMap.entries()) {
@@ -37,11 +40,9 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
             pP += w * base.p;
          }
          
-         const centerT = Terrain[engine.centerTerrain];
-         const borderT = engine.borderTerrain.map(t => t == null ? '--' : Terrain[t]);
-
          setData({
-           q: hex.q, r: hex.r, s: hex.s,
+           hasTile: true,
+           q: hex?.q || 0, r: hex?.r || 0, s: hex?.s || 0,
            terrainStr: Terrain[tile.terrain],
            centerT,
            borderT,
@@ -49,7 +50,12 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
            probs: { m: pM, h: pH, f: pF, p: pP }
          });
        } else {
-         setData(null);
+         setData({
+           hasTile: false,
+           q: hex?.q || 0, r: hex?.r || 0, s: hex?.s || 0,
+           centerT,
+           borderT
+         });
        }
 
        handle = requestAnimationFrame(loop);
@@ -65,10 +71,32 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
       <div className="font-bold text-green-400 mb-2 pb-1 border-b border-slate-700">TERRAIN BLEND DEBUG</div>
       <div className="mb-2">
         HEX: {data.q}, {data.r}, {data.s} <br/>
-        RESULT: <span className="text-amber-300 font-bold">{data.terrainStr}</span>
+        RESULT: {data.hasTile ? <span className="text-amber-300 font-bold">{data.terrainStr}</span> : <span className="text-slate-500 font-bold">VOID</span>}
       </div>
       
-      <div className="mb-2 text-slate-400">
+      {data.hasTile && (
+        <>
+          <div className="mb-2 text-slate-400">
+            <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">BARYCENTRIC WEIGHTS</div>
+            {data.weights.map((w: any, idx: number) => (
+              <div key={idx} className="flex justify-between">
+                <span>{w.name}</span>
+                <span>{(w.w * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="text-slate-400">
+            <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">FINAL PROBABILITIES</div>
+            <div className="flex justify-between"><span className="text-slate-400">Plains</span><span>{(data.probs.p * 100).toFixed(1)}%</span></div>
+            <div className="flex justify-between"><span className="text-green-400">Forest</span><span>{(data.probs.f * 100).toFixed(1)}%</span></div>
+            <div className="flex justify-between"><span className="text-amber-600">Hills</span><span>{(data.probs.h * 100).toFixed(1)}%</span></div>
+            <div className="flex justify-between"><span className="text-slate-300">Mtns</span><span>{(data.probs.m * 100).toFixed(1)}%</span></div>
+          </div>
+        </>
+      )}
+
+      <div className="mt-4 pt-2 border-t border-slate-700 text-slate-400">
         <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">MACRO MAP</div>
         {(() => {
           const tc = (t: string) => {
@@ -94,24 +122,6 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
           );
         })()}
       </div>
-      
-      <div className="mb-2 text-slate-400">
-        <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">BARYCENTRIC WEIGHTS</div>
-        {data.weights.map((w: any, idx: number) => (
-          <div key={idx} className="flex justify-between">
-            <span>{w.name}</span>
-            <span>{(w.w * 100).toFixed(1)}%</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="text-slate-400">
-        <div className="text-[10px] text-slate-500 mb-1 border-b border-slate-700">FINAL PROBABILITIES</div>
-        <div className="flex justify-between"><span className="text-slate-400">Plains</span><span>{(data.probs.p * 100).toFixed(1)}%</span></div>
-        <div className="flex justify-between"><span className="text-green-400">Forest</span><span>{(data.probs.f * 100).toFixed(1)}%</span></div>
-        <div className="flex justify-between"><span className="text-amber-600">Hills</span><span>{(data.probs.h * 100).toFixed(1)}%</span></div>
-        <div className="flex justify-between"><span className="text-slate-300">Mtns</span><span>{(data.probs.m * 100).toFixed(1)}%</span></div>
-      </div>
     </div>
   );
 };
@@ -130,6 +140,8 @@ export default function App() {
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [, forceRender] = useState(0);
+  const [versionMismatch, setVersionMismatch] = useState<{expected: number, found: number | undefined} | null>(null);
+  const isInitStarted = useRef(false);
 
   const activeHexRef = useRef<Hex | null>(null);
   const requestRef = useRef<number>();
@@ -155,11 +167,20 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     
     // Init campaign only once
-    if (!campaignEngineRef.current) {
-      campaignEngineRef.current = new CampaignEngine(1337);
-      campaignRendererRef.current = new CampaignRenderer(canvas);
-      rendererRef.current = new Renderer(canvas);
-      forceRender(v => v + 1);
+    if (!campaignEngineRef.current && !isInitStarted.current) {
+      isInitStarted.current = true;
+      CampaignEngine.checkVersionMismatch().then(({ mismatch, expected, found }) => {
+        if (mismatch) {
+          setVersionMismatch({ expected, found });
+        } else {
+          CampaignEngine.create(1337).then(engine => {
+            campaignEngineRef.current = engine;
+            campaignRendererRef.current = new CampaignRenderer(canvas);
+            rendererRef.current = new Renderer(canvas);
+            forceRender(v => v + 1);
+          });
+        }
+      });
     }
     
     handleResize();
@@ -285,7 +306,8 @@ export default function App() {
 
     // Provide a deterministic seed based on coordinate hash plus threat level
     // q and r will uniquely identify the map tile since the campaign map places it deterministically
-    const seed = hex.q * 8731 + hex.r * 19283 + hex.s * 7823 + threatLevel * 991;
+    const safeHex = hex || { q: 0, r: 0, s: 0 };
+    const seed = safeHex.q * 8731 + safeHex.r * 19283 + safeHex.s * 7823 + threatLevel * 991;
     const engine = new GameEngine(threatLevel, safeEdges, seed, centerTerrain, borderTerrain, savedTiles);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
@@ -383,6 +405,49 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950">
+      {versionMismatch && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-8 z-[100] pointer-events-auto">
+          <div className="bg-slate-800 text-white p-6 rounded-xl border border-slate-600 max-w-lg shadow-2xl space-y-4">
+            <h2 className="text-2xl font-bold text-red-400">Save Version Mismatch</h2>
+            <p className="text-slate-300">
+               We detected a breaking save schema change (Found version: {versionMismatch.found || 'Unknown'}, Expected: {versionMismatch.expected}). 
+            </p>
+            <p className="text-slate-300">
+               Would you like to proceed as-is (and get ready for crashes), or wipe the save state cleanly?
+            </p>
+            <div className="flex gap-4 pt-4">
+               <button onClick={() => { 
+                  setVersionMismatch(null); 
+                  CampaignEngine.create(1337).then(engine => {
+                    campaignEngineRef.current = engine;
+                    if (canvasRef.current) {
+                        campaignRendererRef.current = new CampaignRenderer(canvasRef.current);
+                        rendererRef.current = new Renderer(canvasRef.current);
+                    }
+                    forceRender(v => v + 1);
+                  });
+               }} className="flex-1 bg-amber-600 hover:bg-amber-500 rounded py-2 font-bold transition">
+                  Proceed Anyway
+               </button>
+               <button onClick={async () => { 
+                    await clear(); // from idb-keyval
+                    setVersionMismatch(null); 
+                    CampaignEngine.create(1337).then(engine => {
+                        campaignEngineRef.current = engine;
+                        if (canvasRef.current) {
+                            campaignRendererRef.current = new CampaignRenderer(canvasRef.current);
+                            rendererRef.current = new Renderer(canvasRef.current);
+                        }
+                        forceRender(v => v + 1);
+                    });
+                  }} 
+                  className="flex-1 bg-red-600 hover:bg-red-500 rounded py-2 font-bold transition">
+                  Wipe State
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 ${view === 'CAMPAIGN' ? 'cursor-pointer' : 'cursor-crosshair'}`}
