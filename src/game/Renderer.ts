@@ -143,7 +143,7 @@ export class Renderer {
             let r = 0;
             if (state.techs.includes('HorsebackRiding')) r += 1;
             if (state.techs.includes('AnimalHusbandry')) r += 1;
-            if (state.fusions.includes('SwiftRiders')) r += 1;
+            if (state.fusions.includes('WarChariots')) r += 1;
             drawRadius = HEX_SIZE * (1 + r * 1.5);
          } else if (tile.terrain === Terrain.Hills) {
             let r = 0;

@@ -462,7 +462,7 @@ export class GameEngine {
                     if (att.type === 'friendly' && sFriendlyType.get(att.id, 0) === FriendlyType.Cavalry) {
                        if (this.hasTech('HorsebackRiding')) range += 2;
                        if (this.hasTech('AnimalHusbandry')) range += 1;
-                       if (this.hasFusion('SwiftRiders')) range += 1;
+                       if (this.hasFusion('WarChariots')) range += 1;
                     }
                     if (city && hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, h.id)!) > range) continue;
                 }
@@ -488,7 +488,7 @@ export class GameEngine {
                         if (att.type === 'friendly' && sFriendlyType.get(att.id, 0) === FriendlyType.Cavalry) {
                            if (this.hasTech('HorsebackRiding')) range += 2;
                            if (this.hasTech('AnimalHusbandry')) range += 1;
-                           if (this.hasFusion('SwiftRiders')) range += 1;
+                           if (this.hasFusion('WarChariots')) range += 1;
                         }
                         if (city && hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, h.id)!) > range) continue;
                     }
@@ -517,7 +517,7 @@ export class GameEngine {
                         if (att.type === 'friendly' && sFriendlyType.get(att.id, 0) === FriendlyType.Cavalry) {
                            if (this.hasTech('HorsebackRiding')) range += 2;
                            if (this.hasTech('AnimalHusbandry')) range += 1;
-                           if (this.hasFusion('SwiftRiders')) range += 1;
+                           if (this.hasFusion('WarChariots')) range += 1;
                         }
                         if (city && hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, h.id)!) > range) continue;
                     }
@@ -1329,7 +1329,7 @@ export class GameEngine {
       if (tile?.terrain === Terrain.Plains) {
         if (this.hasTech('HorsebackRiding')) targetCavalry += 1;
         if (this.hasTech('AnimalHusbandry')) targetCavalry += 1;
-        if (this.hasFusion('SwiftRiders')) targetCavalry += 1;
+        if (this.hasFusion('WarChariots')) targetCavalry += 1;
       }
       if (currentCavalry < targetCavalry) {
         const pos = hexToPixel(getHex(sHexPosition, city.id)!, HEX_SIZE);
@@ -1553,7 +1553,7 @@ export class GameEngine {
           let orbitDist = 1;
           if (this.hasTech('HorsebackRiding')) orbitDist += 2;
           if (this.hasTech('AnimalHusbandry')) orbitDist += 1;
-          if (this.hasFusion('SwiftRiders')) orbitDist += 1;
+          if (this.hasFusion('WarChariots')) orbitDist += 1;
           orbitRadius = (orbitDist * Math.sqrt(3)/2 + 0.5) * HEX_SIZE;
         }
         
