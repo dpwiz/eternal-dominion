@@ -136,7 +136,7 @@ export class GameEngine {
       engineers: [],
       techs: [],
       fusions: [],
-      supplies: 40,
+      supplies: 20,
       turn: 1,
       time: 0,
       spawnRates: { scout: 0, warrior: 0, brute: 0, reinforcement: 0 },
@@ -1747,6 +1747,12 @@ export class GameEngine {
       });
       const shuffled = [...available].sort(() => 0.5 - Math.random());
       const picks = shuffled.slice(0, 3);
+      picks.push({
+        id: 'Resupply',
+        name: 'Resupply',
+        description: 'Skip this development and gain +2 Supply instead.'
+      });
+
       if (picks.length > 0) {
         this.state.pendingTechPicks.push(picks);
         if (this.state.phase === 'PLAYING') {
@@ -1757,6 +1763,16 @@ export class GameEngine {
   }
 
   pickTech(techId: string) {
+    if (techId === 'Resupply') {
+      this.state.supplies += 2;
+      this.state.pendingTechPicks.shift();
+      if (this.state.pendingTechPicks.length === 0) {
+        this.state.phase = 'PLAYING';
+      }
+      this.notify(true);
+      return;
+    }
+
     const sHealth = this.world.getStore(Component.Health);
     const sMaxHealth = this.world.getStore(Component.MaxHealth);
     this.state.techs.push(techId);

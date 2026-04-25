@@ -147,6 +147,8 @@ export default function App() {
   const requestRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
 
   // Initialize
   useEffect(() => {
@@ -188,7 +190,7 @@ export default function App() {
     const loop = (time: number) => {
       if (lastTimeRef.current !== 0) {
         const dt = (time - lastTimeRef.current) / 1000;
-        if (engineRef.current) {
+        if (engineRef.current && !isPausedRef.current) {
           engineRef.current.update(Math.min(dt, 0.1));
         }
       }
@@ -254,6 +256,9 @@ export default function App() {
           doInstaLevelUp();
         } else if (e.key.toLowerCase() === 'd') {
           setShowDebug(prev => !prev);
+        } else if (e.key.toLowerCase() === 'p') {
+          isPausedRef.current = !isPausedRef.current;
+          setIsPaused(isPausedRef.current);
         }
       }
     };
@@ -485,6 +490,7 @@ export default function App() {
         return (
           <div className="absolute bottom-4 left-4 pointer-events-none bg-black/80 text-white p-3 rounded font-mono text-sm border border-slate-700 z-50">
             <div className="text-red-400 font-bold mb-1">DEBUG OVERLAY</div>
+            <div>Paused: {isPaused ? "YES" : "NO"}</div>
             <div>Threat Level: {tl}</div>
             <div>Scouts: {(gameState?.currentSpawnRates.scout ?? 0).toFixed(2)}/s</div>
             <div>Warriors: {(gameState?.currentSpawnRates.warrior ?? 0).toFixed(2)}/s</div>
@@ -576,6 +582,14 @@ export default function App() {
 
       {view === 'SURVIVAL' && showDebug && engineRef.current && rendererRef.current && (
          <TerrainDebugPanel engine={engineRef.current} renderer={rendererRef.current} mousePosRef={mousePosRef} />
+      )}
+
+      {isPaused && !showDebug && (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-50 bg-black/40">
+          <h1 className="text-white text-6xl md:text-8xl font-black tracking-[0.3em] opacity-80 backdrop-blur-sm px-12 py-6 rounded-3xl border border-white/10" style={{ textShadow: '0 0 30px rgba(0,0,0,0.8)' }}>
+            PAUSED
+          </h1>
+        </div>
       )}
     </div>
   );

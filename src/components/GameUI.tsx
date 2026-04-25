@@ -272,8 +272,8 @@ export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPic
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-auto">
           <div className="bg-slate-800 p-8 rounded-xl max-w-3xl w-full">
             <h2 className="text-3xl font-bold text-white mb-6 text-center">Level Up!</h2>
-            <div className="grid grid-cols-3 gap-6">
-              {state.pendingTechPicks[0].map(tech => {
+            <div className={`grid ${state.pendingTechPicks[0].filter(t => t.id !== 'Resupply').length === 0 ? 'grid-cols-1' : 'grid-cols-3'} gap-6`}>
+              {state.pendingTechPicks[0].filter(t => t.id !== 'Resupply').map(tech => {
                 const triggeredFusionId = willTriggerFusion(tech.id, state.techs);
                 const titleColorObj = getTechColorClasses(getBaseColor(tech.id));
                 
@@ -295,6 +295,19 @@ export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPic
                   </button>
                 );
               })}
+            </div>
+
+            <div className="mt-8 flex justify-center border-t border-slate-700/50 pt-6">
+              {state.pendingTechPicks[0].filter(t => t.id === 'Resupply').map(tech => (
+                <button
+                  key={tech.id}
+                  onClick={() => onPickTech(tech.id)}
+                  className={`bg-slate-800 hover:bg-slate-700 px-8 py-4 rounded-full text-center transition-all border border-slate-400 hover:border-white flex flex-col items-center gap-1 ${state.supplies <= 0 ? 'shadow-[0_0_15px_rgba(255,255,255,0.5)] opacity-100 animate-[pulse_2s_ease-in-out_infinite]' : 'opacity-75 hover:opacity-100'}`}
+                >
+                  <span className="text-lg font-bold text-white">{tech.name}</span>
+                  <span className="text-xs text-slate-400">{tech.description}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
