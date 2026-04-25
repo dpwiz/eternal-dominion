@@ -1456,7 +1456,7 @@ export class GameEngine {
       if (sFriendlyType.get(unit.id, 0) === FriendlyType.Mystic) {
         unit.cooldown = (unit.cooldown || 0) - dt;
         if (unit.cooldown <= 0) {
-          unit.cooldown = this.hasTech('Mysticism') ? 3 : 5;
+          unit.cooldown = this.hasTech('Animism') ? 3 : 5;
           const baseRadius = 1;
           let range = baseRadius;
           if (this.hasTech('Animism')) range += 1;
@@ -1464,7 +1464,7 @@ export class GameEngine {
           
           const convertChance = this.hasFusion('Theology') ? (this.hasTech('Animism') ? 0.2 : 0.1) : 0;
           let convertedOne = false;
-          const baseDamage = this.hasTech('Mysticism') ? 100 : 50;
+          const baseDamage = this.hasTech('Animism') ? 100 : 50;
           
           for (const enemy of this.state.enemies) {
             if (enemy.isConverted) continue;
