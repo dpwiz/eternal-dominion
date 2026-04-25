@@ -1829,6 +1829,14 @@ export class GameEngine {
     this.notify(true);
   }
 
+  instaLevelUp() {
+    if (this.state.phase === 'PLAYING') {
+      this.state.xp = this.state.xpToNext;
+      this.checkLevelUp();
+      this.notify(true);
+    }
+  }
+
   instaLose() {
     const sHealth = this.world.getStore(Component.Health);
     if (this.state.phase === 'START') {

@@ -231,8 +231,17 @@ export default function App() {
       }
     };
 
+    const doInstaLevelUp = () => {
+      if (engineRef.current && view === 'SURVIVAL') {
+        engineRef.current.instaLevelUp();
+      } else {
+        console.warn("instaLevelUp() can only be called while fighting a survival wave!");
+      }
+    };
+
     (window as any).instaWin = doInstaWin;
     (window as any).instaLose = doInstaLose;
+    (window as any).instaLevelUp = doInstaLevelUp;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Secret keyboard shortcuts
@@ -241,6 +250,8 @@ export default function App() {
           doInstaWin();
         } else if (e.key.toLowerCase() === 'l') {
           doInstaLose();
+        } else if (e.key.toLowerCase() === 't') {
+          doInstaLevelUp();
         } else if (e.key.toLowerCase() === 'd') {
           setShowDebug(prev => !prev);
         }
