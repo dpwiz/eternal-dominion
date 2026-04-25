@@ -1457,17 +1457,28 @@ export class GameEngine {
         unit.cooldown = (unit.cooldown || 0) - dt;
         if (unit.cooldown <= 0) {
           unit.cooldown = this.hasTech('Mysticism') ? 3 : 5;
-          let range = 1;
+          const baseRadius = 1;
+          let range = baseRadius;
           if (this.hasTech('Animism')) range += 1;
           if (this.hasFusion('Theology')) range += 1;
           
           const convertChance = this.hasFusion('Theology') ? (this.hasTech('Animism') ? 0.2 : 0.1) : 0;
           let convertedOne = false;
+          const baseDamage = this.hasTech('Mysticism') ? 100 : 50;
           
           for (const enemy of this.state.enemies) {
             if (enemy.isConverted) continue;
-            if (hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, enemy.id)!) <= range) {
-              sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - (this.hasTech('Mysticism') ? 100 : 50), 0);
+            const dist = hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, enemy.id)!);
+            if (dist <= range) {
+              let damageMult = 1.0;
+              if (dist > baseRadius && range > baseRadius) {
+                damageMult = (range - dist) / (range - baseRadius);
+              }
+              const damage = baseDamage * damageMult;
+              
+              if (damage > 0) {
+                sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - damage, 0);
+              }
               this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), sMobType.get(enemy.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 8);
               this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#a855f7', 5);
               if (convertChance > 0 && Math.random() < convertChance && !convertedOne && sHealth.get(enemy.id, 0) > 0 && !enemy.isVoidspawn) {
