@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GameEngine, HEX_SIZE, getWaveComposition } from './game/Engine';
+import { GameEngine } from './game/Engine';
+import { HEX_SIZE } from './game/Const';
+import * as MapGen from './game/systems/mapgen';
+import { getWaveComposition } from './game/helpers/waves';
 import { Renderer } from './game/Renderer';
 import { GameUI } from './components/GameUI';
 import { pixelToHex, hexToString, Hex, hexNeighbor, hexDirections } from './game/HexMath';
@@ -28,12 +31,12 @@ const TerrainDebugPanel = ({ engine, renderer, mousePosRef }: { engine: GameEngi
        const borderT = engine.borderTerrain.map(t => t == null ? '--' : Terrain[t]);
 
        if (tile) {
-         const weightsMap = engine.getTerrainBlend(hex?.q || 0, hex?.r || 0, hex?.s || 0, hexDirections);
+         const weightsMap = MapGen.getTerrainBlend(hex?.q || 0, hex?.r || 0, hex?.s || 0, hexDirections, engine.centerTerrain, engine.borderTerrain);
          const weights: {name: string, w: number}[] = [];
          let pM = 0, pH = 0, pF = 0, pP = 0;
          for (const [t, w] of weightsMap.entries()) {
             weights.push({ name: Terrain[t], w });
-            const base = engine.getTerrainBaseProbabilities(t);
+            const base = MapGen.getTerrainBaseProbabilities(t);
             pM += w * base.m;
             pH += w * base.h;
             pF += w * base.f;

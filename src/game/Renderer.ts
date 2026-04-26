@@ -1,7 +1,7 @@
-import { getHex } from './Engine';
 import { GameState, Terrain, MobUnit, FriendlyType } from './Types';
 import { hexToPixel, hexToString } from './HexMath';
-import { HEX_SIZE, MAP_RADIUS } from './Engine';
+import { HEX_SIZE, MAP_RADIUS } from './Const';
+import { getHex } from './helpers/ecs';
 import { World, Component } from './World';
 
 export class Renderer {

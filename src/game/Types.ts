@@ -20,6 +20,9 @@ export interface Enemy {
   isConverted: boolean;
   isVoidspawn?: boolean;
   targetId?: number;
+  outpostId?: number;
+  isEngaged?: boolean;
+  engagedSlots?: number;
 }
 
 export interface Engineer {

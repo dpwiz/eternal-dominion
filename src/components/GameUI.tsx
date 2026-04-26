@@ -1,7 +1,7 @@
 import React from 'react';
 import { GameState, Terrain, FriendlyType } from '../game/Types';
 import { ALL_TECHS, FUSIONS } from '../game/Content';
-import { getWaveComposition } from '../game/Engine';
+import { getWaveComposition } from '../game/helpers/waves';
 import { hexToString } from '../game/HexMath';
 import { World, Component } from '../game/World';
 
