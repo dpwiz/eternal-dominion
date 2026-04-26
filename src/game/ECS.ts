@@ -54,10 +54,12 @@ export class SparseStore<T extends TypedArray> {
   }
 
   get(entity: number, element: number = 0): number {
+    if (!this.has(entity)) return 0;
     return this.data[(entity % this._capacity) * this.stride + element];
   }
 
   set(entity: number, value: number, element: number = 0): void {
+    if (!this.has(entity)) return;
     this.data[(entity % this._capacity) * this.stride + element] = value;
   }
 }

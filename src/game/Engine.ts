@@ -2,6 +2,7 @@ import { Hex, hexDistance, hexNeighbor, hexToString, hexToPixel, pixelToHex, str
 import { GameState, Terrain, MobUnit, FriendlyType, FriendlyState, EngineerState } from './Types';
 import { ALL_TECHS, FUSIONS } from './Content';
 import { World, Component } from './World';
+import { PRNG } from './Random';
 
 export const HEX_SIZE = 26;
 export const MAP_RADIUS = 10;
@@ -66,11 +67,9 @@ export function getWaveComposition(turn: number, threatLevel: number) {
 
 
 export function getHex(store: any, id: number): import('./HexMath').Hex | null {
+  if (!store.has(id)) return null;
   const q = store.get(id, 0);
   const r = store.get(id, 1);
-  if (q === 0 && r === 0 && store.get(id, 0)===0 && store.get(id, 1)===0) { 
-    // wait, q=0 r=0 is a valid hex. Let's use 32767
-  }
   if (q === 32767 && r === 32767) return null;
   return { q, r, s: -q-r };
 }
@@ -99,10 +98,11 @@ export class GameEngine {
   threatLevel: number;
   safeEdges: boolean[];
   seed: number;
+  rng: PRNG;
   centerTerrain: Terrain;
   borderTerrain: (Terrain | null)[];
 
-  savedImprovements: Record<string, number>;
+  savedImprovements: Record<string, -1 | 0 | 1 | 2>;
 
   constructor(
     threatLevel: number = 0, 
@@ -110,11 +110,12 @@ export class GameEngine {
     seed: number = 12345,
     centerTerrain: Terrain = Terrain.Plains,
     borderTerrain: (Terrain | null)[] = [null, null, null, null, null, null],
-    savedImprovements: Record<string, number> = {}
+    savedImprovements: Record<string, -1 | 0 | 1 | 2> = {}
   ) {
     this.threatLevel = threatLevel;
     this.safeEdges = safeEdges;
     this.seed = seed;
+    this.rng = new PRNG(seed);
     this.centerTerrain = centerTerrain;
     this.borderTerrain = borderTerrain;
     this.savedImprovements = savedImprovements;
@@ -149,15 +150,6 @@ export class GameEngine {
       pendingTechPicks: [],
       stats: { threatsKilled: 0, citiesLost: 0, cumulativeXp: 0 }
     };
-  }
-
-  // Mulberry32 PRNG
-  nextRandom() {
-    this.seed |= 0;
-    this.seed = this.seed + 0x6D2B79F5 | 0;
-    let t = Math.imul(this.seed ^ this.seed >>> 15, 1 | this.seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
 
   getTerrainBaseProbabilities(t: Terrain) {
@@ -262,7 +254,7 @@ export class GameEngine {
            pV += w * base.v;
         }
 
-        const rand = this.nextRandom();
+        const rand = this.rng.next();
         if (rand < pV) terrain = Terrain.Void;
         else if (rand < pV + pM) terrain = Terrain.Mountains;
         else if (rand < pV + pM + pH) terrain = Terrain.Hills;
@@ -270,7 +262,7 @@ export class GameEngine {
         else terrain = Terrain.Plains;
 
         const key = hexToString(hex);
-        let improvementLevel = 0;
+        let improvementLevel: -1 | 0 | 1 | 2 = 0;
         
         if (this.savedImprovements && this.savedImprovements[key] !== undefined) {
            improvementLevel = this.savedImprovements[key];
@@ -371,8 +363,6 @@ export class GameEngine {
     const cityId = this.world.createEntity();
     this.state.cities.push({
       id: cityId,
-      archeryCooldown: 0,
-      mysticismCooldown: 0,
       timeSinceLastDamage: 0,
       size: 1
     });
@@ -381,7 +371,6 @@ export class GameEngine {
     this.world.setComponent(cityId, Component.MaxHealth, maxHp);
     const cityPos = hexToPixel(hex, HEX_SIZE);
     this.world.setComponent(cityId, Component.Position, [cityPos.x, cityPos.y]);
-    this.world.setComponent(cityId, Component.Health, maxHp);
   }
 
   hasTech(id: string) { return this.state.techs.includes(id); }
@@ -537,6 +526,7 @@ export class GameEngine {
   }
 
   update(dt: number) {
+    // Note: VICTORY/GAME_OVER completely halts ticking via this gate. Do not bypass for game state.
     if (this.state.phase !== 'PLAYING') return;
 
     this.assignTargets();
@@ -641,7 +631,7 @@ export class GameEngine {
     if (this.state.focusedHex && this.state.phase === 'PLAYING') {
       const targetHex = this.state.focusedHex;
       
-      const adjCandidates = [];
+      const adjCandidates: import('./HexMath').Hex[] = [];
       for (let i = 0; i < 6; i++) {
         const nHex = hexNeighbor(targetHex, i);
         const nTile = this.state.tiles.get(hexToString(nHex));
@@ -652,7 +642,7 @@ export class GameEngine {
 
       if (adjCandidates.length === 0) {
         let minDist = Infinity;
-        let closestCity = null;
+        let closestCity: import('./Types').City | null = null;
         for (const city of this.state.cities) {
           const dist = hexDistance(getHex(sHexPosition, city.id)!, targetHex);
           if (dist < minDist) {
@@ -676,11 +666,11 @@ export class GameEngine {
           offsetX: 0,
           offsetY: 0
         });
-        sPosition.set(engId, pos.x, 0);
-        sEngineerState.set(engId, EngineerState.MovingToWork, 0);
-        sPosition.set(engId, pos.y, 1);
+        this.world.setComponent(engId, Component.Position, [pos.x, pos.y]);
+        this.world.setComponent(engId, Component.EngineerState, EngineerState.MovingToWork);
         this.world.setComponent(engId, Component.TargetHex, [this.state.focusedHex.q, this.state.focusedHex.r]);
         this.world.setComponent(engId, Component.HomeHex, [candHex.q, candHex.r]);
+        this.world.setComponent(engId, Component.HexPosition, [candHex.q, candHex.r]);
       }
       
       for (const eng of this.state.engineers) {
@@ -743,7 +733,7 @@ export class GameEngine {
            this.spawnSparks(sPosition.get(eng.id, 0), sPosition.get(eng.id, 1), '#aaaaaa', 2);
         }
       } else if (sEngineerState.get(eng.id, 0) === EngineerState.Returning) {
-        let closestPos = null;
+        let closestPos: { x: number, y: number } | null = null;
         let minDist = Infinity;
         
         if (currentTarget) {
@@ -789,8 +779,8 @@ export class GameEngine {
             return false; // Remove engineer
         }
       }
-      sPosition.set(eng.id, sPosition.get(eng.id, 0), 0);
-      sPosition.set(eng.id, sPosition.get(eng.id, 1), 1);
+      const hex = pixelToHex(sPosition.get(eng.id, 0), sPosition.get(eng.id, 1), HEX_SIZE);
+      setHex(sHexPosition, eng.id, hex);
       return true; // Keep engineer
     });
   }
@@ -819,7 +809,7 @@ export class GameEngine {
   }
 
   getRandomEdgeSpawnPos(spawnHex: Hex): {x: number, y: number} {
-    const outsideNeighbors = [];
+    const outsideNeighbors: import('./HexMath').Hex[] = [];
     for (let i = 0; i < 6; i++) {
       const nHex = hexNeighbor(spawnHex, i);
 
@@ -1141,7 +1131,7 @@ export class GameEngine {
             const nextTile = this.state.tiles.get(hexToString(nextHex));
 
             if (!enemy.isVoidspawn && nextTile && nextTile.terrain === Terrain.Void) {
-              enemy.targetId = null; // Drop geometric lock to prevent walking into void
+              enemy.targetId = undefined; // Drop geometric lock to prevent walking into void
             } else {
               sPosition.set(enemy.id, nextX, 0);
               sPosition.set(enemy.id, nextY, 1);
@@ -1449,7 +1439,6 @@ export class GameEngine {
             sPosition.set(unit.id, nextY, 1);
         }
 
-        sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
         return true;
       }
 
@@ -1466,25 +1455,35 @@ export class GameEngine {
           let convertedOne = false;
           const baseDamage = this.hasTech('Animism') ? 100 : 50;
           
+          const cityPx = { x: sPosition.get(city.id, 0), y: sPosition.get(city.id, 1) };
+          // HEX_SIZE is centre-to-vertex; centre-to-centre between adjacent hexes is HEX_SIZE * sqrt(3).
+          const ringPx = HEX_SIZE * Math.sqrt(3);
+          const innerPx = baseRadius * ringPx;
+          const outerPx = range * ringPx;
+
           for (const enemy of this.state.enemies) {
             if (enemy.isConverted) continue;
-            const dist = hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, enemy.id)!);
-            if (dist <= range) {
-              let damageMult = 1.0;
-              if (dist > baseRadius && range > baseRadius) {
-                damageMult = (range - dist) / (range - baseRadius);
-              }
-              const damage = baseDamage * damageMult;
-              
-              if (damage > 0) {
-                sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - damage, 0);
-              }
-              this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), sMobType.get(enemy.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 8);
-              this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#a855f7', 5);
-              if (convertChance > 0 && Math.random() < convertChance && !convertedOne && sHealth.get(enemy.id, 0) > 0 && !enemy.isVoidspawn) {
-                enemy.isConverted = true;
-                convertedOne = true;
-              }
+            const hexDist = hexDistance(getHex(sHexPosition, city.id)!, getHex(sHexPosition, enemy.id)!);
+            if (hexDist > range) continue;
+
+            const ex = sPosition.get(enemy.id, 0);
+            const ey = sPosition.get(enemy.id, 1);
+            const pixelDist = Math.hypot(ex - cityPx.x, ey - cityPx.y);
+
+            let damageMult = 1.0;
+            if (range > baseRadius && pixelDist > innerPx) {
+              damageMult = Math.max(0, (outerPx - pixelDist) / (outerPx - innerPx));
+            }
+            const damage = baseDamage * damageMult;
+            
+            if (damage > 0) {
+              sHealth.set(enemy.id, sHealth.get(enemy.id, 0) - damage, 0);
+            }
+            this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), sMobType.get(enemy.id, 0) === MobUnit.Brute ? '#8b0000' : '#ff0000', 8);
+            this.spawnSparks(sPosition.get(enemy.id, 0), sPosition.get(enemy.id, 1), '#a855f7', 5);
+            if (convertChance > 0 && Math.random() < convertChance && !convertedOne && sHealth.get(enemy.id, 0) > 0 && !enemy.isVoidspawn) {
+              enemy.isConverted = true;
+              convertedOne = true;
             }
           }
         }
@@ -1501,9 +1500,6 @@ export class GameEngine {
             sPosition.set(unit.id, nextY, 1);
         }
 
-        sPosition.set(unit.id, sPosition.get(unit.id, 0), 0);
-        sPosition.set(unit.id, sPosition.get(unit.id, 1), 1);
-        sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
         return true;
       }
 
@@ -1637,9 +1633,6 @@ export class GameEngine {
          }
       }
 
-      sPosition.set(unit.id, sPosition.get(unit.id, 0), 0);
-      sPosition.set(unit.id, sPosition.get(unit.id, 1), 1);
-      sHealth.set(unit.id, sHealth.get(unit.id, 0), 0);
       return true;
     });
 
@@ -1713,16 +1706,12 @@ export class GameEngine {
         return false;
       }
 
-      sPosition.set(e.id, sPosition.get(e.id, 0), 0);
-      sPosition.set(e.id, sPosition.get(e.id, 1), 1);
-      sHealth.set(e.id, sHealth.get(e.id, 0), 0);
       return true;
     });
 
     const initialCities = this.state.cities.length;
     this.state.cities = this.state.cities.filter(c => {
         if (sHealth.get(c.id, 0) <= 0) { this.world.destroyEntity(c.id); return false; }
-        sHealth.set(c.id, sHealth.get(c.id, 0), 0);
         return true;
     });
     if (this.state.cities.length < initialCities) {
@@ -1813,17 +1802,13 @@ export class GameEngine {
   }
 
   onTurnChange(turn: number) {
-    for (const city of this.state.cities) {
-      city.size++;
-    }
-
     if (this.state.focusedHex) {
       const tile = this.state.tiles.get(hexToString(this.state.focusedHex));
       if (tile) {
         if (tile.improvementLevel === -1) {
           tile.improvementLevel = 1;
         } else {
-          tile.improvementLevel = (tile.improvementLevel || 0) + 1;
+          tile.improvementLevel = ((tile.improvementLevel || 0) + 1) as -1 | 0 | 1 | 2;
         }
         this.state.supplies -= 1;
         if (tile.improvementLevel === 2) {
@@ -1853,6 +1838,9 @@ export class GameEngine {
     this.state.phase = 'VICTORY';
     for (const e of this.state.enemies) this.world.destroyEntity(e.id);
     this.state.enemies = [];
+    for (const p of this.state.projectiles) this.world.destroyEntity(p.id);
+    this.state.projectiles = [];
+    this.state.particles = [];
     this.notify(true);
   }
 

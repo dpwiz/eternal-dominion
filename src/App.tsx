@@ -143,6 +143,15 @@ export default function App() {
   const [versionMismatch, setVersionMismatch] = useState<{expected: number, found: number | undefined} | null>(null);
   const isInitStarted = useRef(false);
 
+  const bootCampaign = (canvas: HTMLCanvasElement) => {
+    CampaignEngine.create(1337).then(engine => {
+      campaignEngineRef.current = engine;
+      campaignRendererRef.current = new CampaignRenderer(canvas);
+      rendererRef.current = new Renderer(canvas);
+      forceRender(v => v + 1);
+    });
+  };
+
   const activeHexRef = useRef<Hex | null>(null);
   const requestRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
@@ -175,12 +184,7 @@ export default function App() {
         if (mismatch) {
           setVersionMismatch({ expected, found });
         } else {
-          CampaignEngine.create(1337).then(engine => {
-            campaignEngineRef.current = engine;
-            campaignRendererRef.current = new CampaignRenderer(canvas);
-            rendererRef.current = new Renderer(canvas);
-            forceRender(v => v + 1);
-          });
+          bootCampaign(canvas);
         }
       });
     }
@@ -323,7 +327,7 @@ export default function App() {
     // Provide a deterministic seed based on coordinate hash plus threat level
     // q and r will uniquely identify the map tile since the campaign map places it deterministically
     const safeHex = hex || { q: 0, r: 0, s: 0 };
-    const seed = safeHex.q * 8731 + safeHex.r * 19283 + safeHex.s * 7823 + threatLevel * 991;
+    const seed = (safeHex.q * 73856093) ^ (safeHex.r * 19349663) ^ (threatLevel * 83492791);
     const engine = new GameEngine(threatLevel, safeEdges, seed, centerTerrain, borderTerrain, savedTiles);
     engine.onStateChange = setGameState;
     engineRef.current = engine;
@@ -434,28 +438,14 @@ export default function App() {
             <div className="flex gap-4 pt-4">
                <button onClick={() => { 
                   setVersionMismatch(null); 
-                  CampaignEngine.create(1337).then(engine => {
-                    campaignEngineRef.current = engine;
-                    if (canvasRef.current) {
-                        campaignRendererRef.current = new CampaignRenderer(canvasRef.current);
-                        rendererRef.current = new Renderer(canvasRef.current);
-                    }
-                    forceRender(v => v + 1);
-                  });
+                  if (canvasRef.current) bootCampaign(canvasRef.current);
                }} className="flex-1 bg-amber-600 hover:bg-amber-500 rounded py-2 font-bold transition">
                   Proceed Anyway
                </button>
                <button onClick={async () => { 
                     await clear(); // from idb-keyval
                     setVersionMismatch(null); 
-                    CampaignEngine.create(1337).then(engine => {
-                        campaignEngineRef.current = engine;
-                        if (canvasRef.current) {
-                            campaignRendererRef.current = new CampaignRenderer(canvasRef.current);
-                            rendererRef.current = new Renderer(canvasRef.current);
-                        }
-                        forceRender(v => v + 1);
-                    });
+                    if (canvasRef.current) bootCampaign(canvasRef.current);
                   }} 
                   className="flex-1 bg-red-600 hover:bg-red-500 rounded py-2 font-bold transition">
                   Wipe State

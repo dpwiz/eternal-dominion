@@ -11,8 +11,6 @@ export enum EngineerState { MovingToWork, Working, Returning }
 
 export interface City {
   id: number;
-  archeryCooldown: number;
-  mysticismCooldown: number;
   timeSinceLastDamage: number;
   size: number;
 }
@@ -63,7 +61,7 @@ export interface Particle {
 export interface Tile {
   hex: Hex;
   terrain: Terrain;
-  improvementLevel?: number; // 0, 1, 2
+  improvementLevel?: -1 | 0 | 1 | 2; // -1 ruins, 0 wild, 1 improved, 2 outpost
 }
 
 export interface Tech {

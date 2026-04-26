@@ -50,13 +50,11 @@ export class Renderer {
       const isPlayArea = Math.max(Math.abs((tile.hex || {q:0}).q), Math.abs((tile.hex || {r:0}).r), Math.abs((tile.hex || {s:0}).s)) <= MAP_RADIUS;
 
       if (isPlayArea) {
-        let drawColor = color;
         if (tile.improvementLevel === -1) {
           // Tinted gray-ish ruins
           this.ctx.globalAlpha = 0.5;
           this.drawHex(pos.x, pos.y, HEX_SIZE - 1, '#111111');
           this.ctx.globalAlpha = 1.0;
-          drawColor = '#4a4a4a'; // Overlay basic
         }
         this.drawHex(pos.x, pos.y, HEX_SIZE - 1,  tile.improvementLevel === -1 ? `color-mix(in srgb, ${color} 40%, #1a1a1a)` : color);
       }
@@ -186,10 +184,6 @@ export class Renderer {
       
       let renderX = sPosition.get(unit.id, 0);
       let renderY = sPosition.get(unit.id, 1);
-      if (sPosition.has(unit.id)) {
-          renderX = sPosition.get(unit.id, 0);
-          renderY = sPosition.get(unit.id, 1);
-      }
 
       this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
 
@@ -252,10 +246,6 @@ export class Renderer {
 
       let renderX = sPosition.get(enemy.id, 0);
       let renderY = sPosition.get(enemy.id, 1);
-      if (sPosition.has(enemy.id)) {
-          renderX = sPosition.get(enemy.id, 0);
-          renderY = sPosition.get(enemy.id, 1);
-      }
 
       this.ctx.arc(renderX, renderY, radius, 0, Math.PI * 2);
       
@@ -288,10 +278,6 @@ export class Renderer {
       this.ctx.beginPath();
       let renderX = sPosition.get(eng.id, 0);
       let renderY = sPosition.get(eng.id, 1);
-      if (sPosition.has(eng.id)) {
-          renderX = sPosition.get(eng.id, 0);
-          renderY = sPosition.get(eng.id, 1);
-      }
       this.ctx.arc(renderX, renderY, 4, 0, Math.PI * 2);
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fill();
