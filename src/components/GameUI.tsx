@@ -70,6 +70,11 @@ interface GameUIProps {
 }
 
 export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPickTech, onRestart, onReturnToCampaign }) => {
+  const sFriendlyType = world.getStore(Component.FriendlyType);
+  const sHealth = world.getStore(Component.Health);
+  const sHexPosition = world.getStore(Component.HexPosition);
+  const sMaxHealth = world.getStore(Component.MaxHealth);
+
   const acquiredTechs = state.techs.map(id => ALL_TECHS.find(t => t.id === id)).filter(Boolean);
   const acquiredFusions = state.fusions.map(id => FUSIONS.find(f => f.id === id)).filter(Boolean);
 
@@ -100,13 +105,25 @@ export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPic
     }
   };
 
-  const sortedCities = [...state.cities].sort((a, b) => {
-    const tileA = state.tiles.get(hexToString(a.hex));
-    const tileB = state.tiles.get(hexToString(b.hex));
-    const typeA = tileA?.terrain ?? -1;
-    const typeB = tileB?.terrain ?? -1;
-    if (typeA !== typeB) return typeA - typeB;
-    return b.size - a.size;
+  const preparedCities = [...state.cities].map((city, _index) => {
+    const id = city.id;
+    const q = sHexPosition.get(city.id, 0);
+    const r = sHexPosition.get(city.id, 1);
+    const terrain = state.tiles.get(hexToString({q, r, s: -q-r})).terrain;
+    const terrainName = getTerrainName(terrain);
+    const terrainColor = getTerrainColor(terrain);
+    const defenders = state.friendlyUnits.filter(u =>
+      u.cityId === city.id && sFriendlyType.get(u.id) === FriendlyType.Guard
+    ).length;
+    const maxDefenders = Math.min(6, city.size);
+    const hp = sHealth.get(city.id);
+    const maxHp = sMaxHealth.get(city.id);
+    return {id, hp, maxHp, defenders, maxDefenders, terrain, terrainColor, terrainName}
+  })
+
+  const sortedCities = [...preparedCities].sort((a, b) => {
+    if (a.terrain !== b.terrain) return a.terrain - b.terrain;
+    return b.maxDefenders - a.maxDefenders;
   });
 
   return (
@@ -152,28 +169,18 @@ export const GameUI: React.FC<GameUIProps> = ({ state, world, threatLevel, onPic
           <div className="bg-slate-900/80 text-white p-4 rounded-lg pointer-events-auto border border-slate-700 shadow-xl shrink-0">
             <h3 className="text-lg font-bold text-green-400 mb-2 border-b border-slate-700 pb-1">Outposts: {state.cities.length}</h3>
             <div className="flex flex-col gap-2">
-              {sortedCities.map((city, index) => {
-                const sHexPosition = world.getStore(Component.HexPosition);
-                const q = sHexPosition.get(city.id, 0);
-                const r = sHexPosition.get(city.id, 1);
-                const tile = state.tiles.get(hexToString({q, r, s: -q-r}));
-                const terrainName = getTerrainName(tile?.terrain);
-                const terrainColor = getTerrainColor(tile?.terrain);
-                const defenders = state.friendlyUnits.filter(u => u.cityId === city.id && world.getStore(Component.FriendlyType).get(u.id, 0) === FriendlyType.Guard).length;
-                const maxDefenders = Math.min(6, city.size);
-                const cityHp = world.getStore(Component.Health).get(city.id, 0);
-                const cityMaxHp = world.getStore(Component.MaxHealth).get(city.id, 0);
+              {sortedCities.map(({id, hp, maxHp, defenders, maxDefenders, terrainColor, terrainName}, _index) => {
                 return (
-                  <div key={city.id} className="flex flex-col text-sm">
+                  <div key={id} className="flex flex-col text-sm">
                     <div className="flex justify-between items-center text-slate-400 text-xs mt-1">
-                      <span>HP: {Math.floor(cityHp)}/{Math.floor(cityMaxHp)}</span>
-                      <span className={`font-medium px-2 ${terrainColor}`}>{terrainName} ({q},{r})</span>
+                      <span>HP: {Math.floor(hp)}/{Math.floor(maxHp)}</span>
+                      <span className={`font-medium px-2 ${terrainColor}`}>{terrainName}</span>
                       <span>Guards: {defenders}/{maxDefenders}</span>
                     </div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-1 overflow-hidden">
                       <div 
                         className="bg-red-500 h-full transition-all duration-200" 
-                        style={{ width: `${(cityHp / cityMaxHp) * 100}%` }}
+                        style={{ width: `${(hp / maxHp) * 100}%` }}
                       />
                     </div>
                   </div>

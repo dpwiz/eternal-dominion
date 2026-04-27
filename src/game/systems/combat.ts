@@ -21,7 +21,6 @@ function updateCitySizes(state: GameState, world: World) {
 }
 
 export function updateCombat(state: GameState, world: World, dt: number, costs: Map<string, number>, onFlowFieldUpdate: () => void) {
-  const replaceUpdateCitySizes = () => { updateCitySizes(state, world); }; // proxy
   // Replace references
       const sHealth = world.getStore(Component.Health);
     const sMaxHealth = world.getStore(Component.MaxHealth);
